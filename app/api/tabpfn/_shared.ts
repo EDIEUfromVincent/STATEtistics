@@ -24,6 +24,12 @@ type PredictionResponse = {
   };
 };
 
+type FitResponse = {
+  fitted_train_set_id: string;
+  status?: "pending" | "completed" | "failed";
+  error?: string;
+};
+
 export class TabPFNError extends Error {
   status: number;
 
@@ -78,6 +84,21 @@ async function priorFetch<T>(path: string, apiKey: string, init?: RequestInit): 
     }
   }
 
+  const streamedStatus =
+    typeof payload.status_code === "number" ? payload.status_code : undefined;
+  if (payload._streamed_error === true || (streamedStatus != null && streamedStatus >= 400)) {
+    const streamedMessage =
+      typeof payload.detail === "string"
+        ? payload.detail
+        : typeof payload.message === "string"
+          ? payload.message
+          : "TabPFN 작업 처리 중 오류가 발생했습니다.";
+    throw new TabPFNError(
+      streamedMessage,
+      streamedStatus === 429 ? 429 : streamedStatus === 401 || streamedStatus === 403 ? 503 : 502,
+    );
+  }
+
   if (!response.ok) {
     const upstreamMessage =
       typeof payload.message === "string"
@@ -95,6 +116,19 @@ async function priorFetch<T>(path: string, apiKey: string, init?: RequestInit): 
   }
 
   return payload as T;
+}
+
+async function waitForFit(fittedTrainSetId: string, apiKey: string) {
+  const deadline = Date.now() + 120_000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    const status = await priorFetch<FitResponse>(`/tabpfn/fit/${fittedTrainSetId}`, apiKey);
+    if (status.status === "completed") return;
+    if (status.status === "failed") {
+      throw new TabPFNError(status.error || "TabPFN 모델 준비에 실패했습니다.", 502);
+    }
+  }
+  throw new TabPFNError("TabPFN 모델 준비 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.", 504);
 }
 
 function csvEscape(value: unknown) {
@@ -256,7 +290,7 @@ export async function analyzeWithTabPFN(payload: unknown, apiKey: string) {
     uploadBytes(yTrain, preparedTrain.y_train_info),
   ]);
 
-  const fitted = await priorFetch<{ fitted_train_set_id: string }>("/tabpfn/fit", apiKey, {
+  const fitted = await priorFetch<FitResponse>("/tabpfn/fit", apiKey, {
     method: "POST",
     body: JSON.stringify({
       train_set_upload_id: preparedTrain.train_set_upload_id,
@@ -264,6 +298,11 @@ export async function analyzeWithTabPFN(payload: unknown, apiKey: string) {
       tabpfn_systems: ["preprocessing", "text"],
     }),
   });
+  if (fitted.status === "pending") {
+    await waitForFit(fitted.fitted_train_set_id, apiKey);
+  } else if (fitted.status === "failed") {
+    throw new TabPFNError(fitted.error || "TabPFN 모델 준비에 실패했습니다.", 502);
+  }
 
   const preparedTest = await priorFetch<PrepareTestResponse>("/tabpfn/prepare_test_set_upload", apiKey, {
     method: "POST",
