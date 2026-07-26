@@ -21,7 +21,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements-tabpfn.txt ./
 RUN python3 -m venv /opt/tabpfn-client \
-    && /opt/tabpfn-client/bin/pip install --no-cache-dir --disable-pip-version-check -r requirements-tabpfn.txt
+    && /opt/tabpfn-client/bin/pip install --no-cache-dir --disable-pip-version-check -r requirements-tabpfn.txt \
+    && chown -R node:node /opt/tabpfn-client
 
 COPY --from=build --chown=node:node /app/package.json /app/package-lock.json ./
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
