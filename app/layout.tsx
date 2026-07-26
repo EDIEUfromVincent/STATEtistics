@@ -8,12 +8,12 @@ export async function generateMetadata(): Promise<Metadata> {
   const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const image = `${protocol}://${host}/og.png`;
   return {
-    title: "교실 학습데이터 대시보드 | 서울대학교 미래교육혁신센터",
-    description: "학교급과 과목별 합성 학습데이터를 살펴보는 인터랙티브 데모 대시보드",
+    title: "STATEtistic | Personal Data Lab",
+    description: "합성 CSV 생성부터 커스텀 시각화와 TabPFN 예측까지 이어지는 개인 데이터 실험실",
     openGraph: {
-      title: "교실 학습데이터 대시보드",
-      description: "8종 학습데이터를 한눈에 살펴보는 인터랙티브 데모",
-      images: [{ url: image, width: 1732, height: 909, alt: "교실 학습데이터 대시보드" }],
+      title: "STATEtistic · Personal Data Lab",
+      description: "Generate, visualize, and predict from your own CSV data.",
+      images: [{ url: image, width: 1732, height: 909, alt: "STATEtistic Personal Data Lab" }],
     },
     twitter: { card: "summary_large_image", images: [image] },
   };
