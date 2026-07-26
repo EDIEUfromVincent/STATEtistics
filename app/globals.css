@@ -171,6 +171,9 @@ input[type=range] { width:100%; height:4px; margin-top:11px; accent-color:var(--
 .service-pill.offline { color:#c26050; background:#fff0ed; }
 .service-pill.offline i { background:var(--coral); }
 .model-controls { display:grid; grid-template-columns:.7fr 1.3fr; gap:8px; }
+.access-key-control { display:block; margin-top:10px; color:#7b8495; font-size:9px; font-weight:800; }
+.access-key-control input { display:block; width:100%; height:36px; margin-top:6px; border:1px solid #dfe3eb; border-radius:6px; padding:0 10px; color:#35415a; font-size:10px; background:#fafbfc; }
+.access-key-control input:focus { outline:2px solid #3758d326; border-color:#8da0e8; }
 .model-spec { display:grid; grid-template-columns:repeat(4,1fr); gap:5px; margin:15px 0; }
 .model-spec div { background:#f6f8fb; border-radius:6px; padding:10px 9px; }
 .model-spec span { display:block; color:#9ba2af; font-size:7px; font-weight:900; letter-spacing:.6px; }

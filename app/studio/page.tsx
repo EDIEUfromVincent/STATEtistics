@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { AppHeader } from "../components/AppHeader";
 
 type Row = Record<string, string>;
@@ -60,6 +61,11 @@ export default function StudioPage() {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<ModelResult | null>(null);
   const [error, setError] = useState("");
+  const [serviceMessage, setServiceMessage] = useState("");
+  const [requiresAccessKey, setRequiresAccessKey] = useState(false);
+  const [accessKey, setAccessKey] = useState(() =>
+    typeof window === "undefined" ? "" : localStorage.getItem("statetistic:accessKey") ?? "",
+  );
 
   useEffect(() => {
     const stored = localStorage.getItem("statetistic:lastCsv");
@@ -86,12 +92,22 @@ export default function StudioPage() {
 
   async function checkService() {
     setService("checking");
+    setServiceMessage("");
     try {
-      const response = await fetch("http://127.0.0.1:8765/health");
+      const response = await fetch("/api/tabpfn/health", { cache: "no-store" });
+      const payload = await response.json();
+      setRequiresAccessKey(Boolean(payload.requires_access_key));
+      setServiceMessage(payload.error ?? "");
       setService(response.ok ? "online" : "offline");
     } catch {
+      setServiceMessage("STATEtistic 서버의 TabPFN API에 연결할 수 없습니다.");
       setService("offline");
     }
+  }
+
+  function updateAccessKey(value: string) {
+    setAccessKey(value);
+    localStorage.setItem("statetistic:accessKey", value);
   }
 
   async function runTabPFN() {
@@ -100,9 +116,12 @@ export default function StudioPage() {
     setError("");
     setResult(null);
     try {
-      const response = await fetch("http://127.0.0.1:8765/analyze", {
+      const response = await fetch("/api/tabpfn/analyze", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(accessKey ? { "X-STATEtistic-Access-Key": accessKey } : {}),
+        },
         body: JSON.stringify({ rows: data.rows, target, task, test_size: 0.25 }),
       });
       const payload = await response.json();
@@ -110,8 +129,7 @@ export default function StudioPage() {
       setResult(payload);
       setService("online");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "로컬 분석 엔진에 연결할 수 없습니다.");
-      setService("offline");
+      setError(reason instanceof Error ? reason.message : "TabPFN 분석 요청에 실패했습니다.");
     } finally {
       setRunning(false);
     }
@@ -134,7 +152,7 @@ export default function StudioPage() {
         </section>
 
         {!data ? (
-          <section className="studio-empty"><span>CSV</span><h3>분석할 데이터가 아직 없습니다</h3><p>CSV를 업로드하거나 데이터 생성기에서 “시각화 스튜디오에서 열기”를 선택하세요.</p><a href="/">데이터 생성기로 이동</a></section>
+          <section className="studio-empty"><span>CSV</span><h3>분석할 데이터가 아직 없습니다</h3><p>CSV를 업로드하거나 데이터 생성기에서 “시각화 스튜디오에서 열기”를 선택하세요.</p><Link href="/">데이터 생성기로 이동</Link></section>
         ) : (
           <div className="studio-grid">
             <section className="studio-card visualize-card">
@@ -150,21 +168,22 @@ export default function StudioPage() {
 
             <section className="studio-card tabpfn-card">
               <header>
-                <div><span>02</span><h3>TabPFN 예측</h3><p>작은 표형 데이터에 특화된 파운데이션 모델입니다.</p></div>
-                <button className={`service-pill ${service}`} onClick={checkService}><i />{service === "online" ? "엔진 연결됨" : service === "checking" ? "확인 중" : "엔진 꺼짐"}</button>
+                <div><span>02</span><h3>TabPFN API 예측</h3><p>API 키는 서버에만 보관되고 분석은 이 화면에서 끝납니다.</p></div>
+                <button className={`service-pill ${service}`} onClick={checkService}><i />{service === "online" ? "API 연결됨" : service === "checking" ? "확인 중" : "설정 필요"}</button>
               </header>
               <div className="model-controls">
                 <label>문제 유형<select value={task} onChange={event => setTask(event.target.value)}><option value="classification">분류</option><option value="regression">회귀</option></select></label>
                 <label>예측할 목표 열<select value={target} onChange={event => setTarget(event.target.value)}>{data.columns.map(column => <option key={column}>{column}</option>)}</select></label>
               </div>
+              {requiresAccessKey && <label className="access-key-control">분석 액세스 코드<input type="password" autoComplete="off" value={accessKey} onChange={event => updateAccessKey(event.target.value)} placeholder="이 브라우저에만 저장됩니다" /></label>}
               <div className="model-spec">
                 <div><span>TRAIN</span><b>75%</b></div><div><span>TEST</span><b>25%</b></div><div><span>FEATURES</span><b>{Math.max(0, data.columns.length - 1)}</b></div><div><span>ROWS</span><b>{data.rows.length}</b></div>
               </div>
-              <button className="run-model" disabled={running || service === "offline"} onClick={runTabPFN}>{running ? "TabPFN 분석 중…" : "TabPFN 모델 실행"}<b>→</b></button>
-              {service === "offline" && <div className="engine-guide"><strong>로컬 엔진을 먼저 실행하세요</strong><code>powershell -ExecutionPolicy Bypass -File scripts/start-tabpfn.ps1</code><small>최초 실행 시 모델 이용약관 동의와 체크포인트 다운로드가 필요할 수 있습니다.</small></div>}
+              <button className="run-model" disabled={running || service === "offline" || (requiresAccessKey && !accessKey)} onClick={runTabPFN}>{running ? "TabPFN API 분석 중…" : "TabPFN 모델 실행"}<b>→</b></button>
+              {service === "offline" && <div className="engine-guide"><strong>TabPFN API 설정을 확인하세요</strong><code>Railway Variables → PRIORLABS_API_KEY</code><small>{serviceMessage || "API 키는 브라우저나 GitHub에 노출되지 않고 STATEtistic 서버에서만 사용됩니다."}</small></div>}
               {error && <div className="model-error">{error}</div>}
               {result && <ModelResults result={result} />}
-              <p className="license-note">TabPFN 모델 가중치는 비상업적 라이선스가 적용될 수 있습니다. 개인 연구·실험 범위에서 사용 조건을 확인하세요.</p>
+              <p className="license-note">업로드한 데이터는 예측을 위해 Prior Labs API로 전송됩니다. 민감정보나 개인식별정보는 제거한 뒤 사용하세요.</p>
             </section>
           </div>
         )}
