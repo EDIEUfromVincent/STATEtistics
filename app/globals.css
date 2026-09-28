@@ -260,3 +260,24 @@ input[type=range] { width:100%; height:4px; margin-top:11px; accent-color:var(--
 .feature-picker label { display:flex; gap:4px; align-items:center; font-size:11px; background:#f4f6fa; border:1px solid #e5e8ef; border-radius:5px; padding:4px 7px; }
 @media (max-width:900px) { .grading-two,.standard-grid { grid-template-columns:1fr; } .preview-student { grid-template-columns:1fr; } .topbar { grid-template-columns:1fr; } nav { flex-wrap:wrap; } }
 .reviewed-row { background:#f1f8f4; color:#6b8f7a; }
+
+/* 묶음 메뉴 */
+.nav-groups { display:flex; gap:14px; align-items:flex-start; }
+.nav-group { display:grid; gap:3px; padding:6px 8px 4px; border-radius:9px; border:1px solid transparent; }
+.nav-group.current { background:#f6f8fd; border-color:#e3e8f5; }
+.nav-group>span { font-size:10px; letter-spacing:.4px; color:#9aa2b1; font-weight:700; padding-left:4px; }
+.nav-group>div { display:flex; gap:2px; }
+.nav-group a { padding:7px 11px; }
+
+/* 채점 단계 */
+.step-bar { display:flex; justify-content:space-between; align-items:center; gap:14px; flex-wrap:wrap; background:white; border:1px solid var(--line); border-radius:9px; padding:10px 14px; }
+.step-bar ol { display:flex; gap:4px; margin:0; padding:0; list-style:none; flex-wrap:wrap; }
+.step-bar li a { display:flex; align-items:center; gap:7px; padding:7px 11px; border-radius:7px; text-decoration:none; color:#677186; font-size:13px; font-weight:700; }
+.step-bar li a span { display:inline-grid; place-items:center; width:20px; height:20px; border-radius:50%; background:#eef1f7; color:#6f788b; font-size:11px; }
+.step-bar li.done a span { background:var(--teal); color:white; }
+.step-bar li.current a { background:#edf1ff; color:var(--blue); }
+.step-bar li.current a span { background:var(--blue); color:white; }
+.step-side { display:flex; align-items:center; gap:12px; font-size:12px; }
+.step-next { display:flex; align-items:center; gap:12px; margin-top:16px; }
+.step-next a.primary-action { text-decoration:none; }
+.grading-page .primary-action,.grading-page .secondary-action { width:auto; height:auto; margin:0; padding:10px 16px; display:inline-flex; align-items:center; text-decoration:none; }
