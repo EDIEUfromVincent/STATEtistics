@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-type ActivePage = "generate" | "dashboard" | "studio";
+type ActivePage = "generate" | "dashboard" | "studio" | "grading" | "analysis";
 
 export function AppHeader({
   active,
@@ -24,6 +24,8 @@ export function AppHeader({
       <nav aria-label="주요 메뉴">
         <Link className={active === "generate" ? "active" : ""} href="/">데이터 생성</Link>
         <Link className={active === "dashboard" ? "active" : ""} href="/dashboard">대시보드</Link>
+        <Link className={active === "grading" ? "active" : ""} href="/grading">채점</Link>
+        <Link className={active === "analysis" ? "active" : ""} href="/analysis">평가 분석</Link>
         <Link className={active === "studio" ? "active" : ""} href="/studio">시각화 · TabPFN</Link>
       </nav>
     </header>

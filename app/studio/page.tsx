@@ -50,6 +50,23 @@ function isNumericColumn(rows: Row[], column: string) {
   return present.length > 0 && present.filter(value => Number.isFinite(Number(value))).length / present.length > 0.9;
 }
 
+// 예측에 쓸모가 없고 사람을 가리킬 수 있는 열은 기본으로 전송하지 않는다.
+const IDENTIFIER_NAME = /(ID|Id|id|코드|이름|성명|학생명|번호)$/;
+const FREE_TEXT_NAME = /(응답|메모|의견|서술|내용|코멘트|피드백)$/;
+
+function excludedReason(rows: Row[], column: string) {
+  const values = rows.map(row => row[column]).filter(Boolean);
+  if (IDENTIFIER_NAME.test(column)) return "식별자";
+  if (FREE_TEXT_NAME.test(column)) return "자유 서술";
+  if (values.length > 10 && !isNumericColumn(rows, column) && new Set(values).size / values.length > 0.9) return "행마다 값이 다름";
+  if (values.length && values.reduce((sum, v) => sum + v.length, 0) / values.length > 20) return "긴 글";
+  return "";
+}
+
+function defaultFeatures(parsed: ParsedCsv, target: string) {
+  return parsed.columns.filter(column => column !== target && !excludedReason(parsed.rows, column));
+}
+
 export default function StudioPage() {
   const [data, setData] = useState<ParsedCsv | null>(null);
   const [xColumn, setXColumn] = useState("");
@@ -63,13 +80,17 @@ export default function StudioPage() {
   const [error, setError] = useState("");
   const [serviceMessage, setServiceMessage] = useState("");
   const [requiresAccessKey, setRequiresAccessKey] = useState(false);
+  const [features, setFeatures] = useState<string[]>([]);
   const [accessKey, setAccessKey] = useState(() =>
     typeof window === "undefined" ? "" : localStorage.getItem("statetistic:accessKey") ?? "",
   );
 
   useEffect(() => {
-    const stored = localStorage.getItem("statetistic:lastCsv");
-    if (stored) loadData(parseCsv(stored, localStorage.getItem("statetistic:lastName") ?? "generated.csv"));
+    // 평가 분석에서 넘어온 실제 데이터는 이 탭(sessionStorage)에만 두고 브라우저에 남기지 않는다
+    const handoff = sessionStorage.getItem("statetistic:handoffCsv");
+    const stored = handoff ?? localStorage.getItem("statetistic:lastCsv");
+    const name = handoff ? sessionStorage.getItem("statetistic:handoffName") : localStorage.getItem("statetistic:lastName");
+    if (stored) loadData(parseCsv(stored, name ?? "generated.csv"));
     checkService();
   }, []);
 
@@ -80,7 +101,9 @@ export default function StudioPage() {
     const numeric = parsed.columns.filter(column => isNumericColumn(parsed.rows, column));
     setXColumn(parsed.columns[0] ?? "");
     setYColumn(numeric[0] ?? parsed.columns[1] ?? "");
-    setTarget(parsed.columns[parsed.columns.length - 1] ?? "");
+    const nextTarget = parsed.columns[parsed.columns.length - 1] ?? "";
+    setTarget(nextTarget);
+    setFeatures(defaultFeatures(parsed, nextTarget));
     setResult(null);
     setError("");
   }
@@ -122,7 +145,8 @@ export default function StudioPage() {
           "Content-Type": "application/json",
           ...(accessKey ? { "X-STATEtistic-Access-Key": accessKey } : {}),
         },
-        body: JSON.stringify({ rows: data.rows, target, task, test_size: 0.25 }),
+        // 고른 입력 열과 목표 열만 보낸다
+        body: JSON.stringify({ rows: data.rows.map(row => Object.fromEntries([...features, target].map(column => [column, row[column]]))), target, task, test_size: 0.25 }),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "TabPFN 분석에 실패했습니다.");
@@ -173,17 +197,23 @@ export default function StudioPage() {
               </header>
               <div className="model-controls">
                 <label>문제 유형<select value={task} onChange={event => setTask(event.target.value)}><option value="classification">분류</option><option value="regression">회귀</option></select></label>
-                <label>예측할 목표 열<select value={target} onChange={event => setTarget(event.target.value)}>{data.columns.map(column => <option key={column}>{column}</option>)}</select></label>
+                <label>예측할 목표 열<select value={target} onChange={event => { setTarget(event.target.value); setFeatures(defaultFeatures(data, event.target.value)); }}>{data.columns.map(column => <option key={column}>{column}</option>)}</select></label>
+              </div>
+              <div className="feature-picker" aria-label="전송할 입력 열">
+                {data.columns.filter(column => column !== target).map(column => {
+                  const reason = excludedReason(data.rows, column);
+                  return <label key={column} title={reason ? `기본 제외: ${reason}` : ""}><input type="checkbox" checked={features.includes(column)} onChange={event => setFeatures(current => event.target.checked ? [...current, column] : current.filter(v => v !== column))} />{column}{reason && <small> ({reason})</small>}</label>;
+                })}
               </div>
               {requiresAccessKey && <label className="access-key-control">분석 액세스 코드<input type="password" autoComplete="off" value={accessKey} onChange={event => updateAccessKey(event.target.value)} placeholder="이 브라우저에만 저장됩니다" /></label>}
               <div className="model-spec">
-                <div><span>TRAIN</span><b>75%</b></div><div><span>TEST</span><b>25%</b></div><div><span>FEATURES</span><b>{Math.max(0, data.columns.length - 1)}</b></div><div><span>ROWS</span><b>{data.rows.length}</b></div>
+                <div><span>TRAIN</span><b>75%</b></div><div><span>TEST</span><b>25%</b></div><div><span>FEATURES</span><b>{features.length}</b></div><div><span>ROWS</span><b>{data.rows.length}</b></div>
               </div>
-              <button className="run-model" disabled={running || service === "offline" || (requiresAccessKey && !accessKey)} onClick={runTabPFN}>{running ? "TabPFN API 분석 중…" : "TabPFN 모델 실행"}<b>→</b></button>
+              <button className="run-model" disabled={running || service === "offline" || (requiresAccessKey && !accessKey) || !features.length} onClick={runTabPFN}>{running ? "TabPFN API 분석 중…" : "TabPFN 모델 실행"}<b>→</b></button>
               {service === "offline" && <div className="engine-guide"><strong>TabPFN API 설정을 확인하세요</strong><code>Railway Variables → PRIORLABS_API_KEY</code><small>{serviceMessage || "API 키는 브라우저나 GitHub에 노출되지 않고 STATEtistic 서버에서만 사용됩니다."}</small></div>}
               {error && <div className="model-error">{error}</div>}
               {result && <ModelResults result={result} />}
-              <p className="license-note">업로드한 데이터는 예측을 위해 Prior Labs API로 전송됩니다. 민감정보나 개인식별정보는 제거한 뒤 사용하세요.</p>
+              <p className="license-note">체크한 열 {features.length}개와 목표 열만 예측을 위해 Prior Labs API(외부)로 전송됩니다. 식별자·자유 서술 열은 기본으로 빠져 있습니다. 실제 학생 자료라면 전송 전에 열 목록을 다시 확인하세요.</p>
             </section>
           </div>
         )}

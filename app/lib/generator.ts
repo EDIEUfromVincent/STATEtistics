@@ -1,3 +1,8 @@
+import { loadAnswerKey } from "./assessment/answerKey";
+import { LONG_COLUMNS } from "./assessment/records";
+import { SAMPLE_KEY_CSV } from "./assessment/sampleKey";
+import { generateClass } from "./assessment/synthetic";
+
 export type GeneratorOptions = {
   school: string;
   subject: string;
@@ -18,7 +23,8 @@ export type DatasetId =
   | "affective"
   | "portfolio"
   | "observation"
-  | "collaboration";
+  | "collaboration"
+  | "assessment";
 
 export type GeneratedDataset = {
   id: DatasetId;
@@ -38,6 +44,7 @@ export const datasetCatalog: Array<{ id: DatasetId; label: string; description: 
   { id: "portfolio", label: "포트폴리오/프로젝트", description: "루브릭·동료평가·프로젝트 산출물" },
   { id: "observation", label: "관찰기록", description: "주차별 참여도·이해도·정성 메모" },
   { id: "collaboration", label: "협업활동", description: "모둠·역할·기여도·상호작용" },
+  { id: "assessment", label: "평가 응답(성취기준 연결)", description: "문항별 응답·자동 채점·성취기준·행동영역 — 채점 화면과 같은 형식 (예시: 6학년 과학 연소)" },
 ];
 
 const firstNames = ["서윤", "도윤", "하린", "민준", "시우", "지우", "유진", "은호", "예린", "선우", "하율", "주원", "윤서", "지민", "현우", "다은", "수빈", "준서", "아인", "태윤"];
@@ -177,6 +184,20 @@ function collaboration(options: GeneratorOptions, random: () => number): Generat
   return { id: "collaboration", label: "협업활동", description: datasetCatalog[7].description, filename: "collaboration_activity.csv", columns, rows };
 }
 
+// 난수를 독립적으로 뽑는 다른 데이터셋과 달리, 능력·난이도·오개념 모형으로 응답을 만들고
+// 채점 화면과 같은 채점기로 채점한다. 평가 분석 화면에서 그대로 연습할 수 있다.
+function assessment(options: GeneratorOptions): GeneratedDataset {
+  const items = loadAnswerKey(SAMPLE_KEY_CSV);
+  const rows: GeneratedDataset["rows"] = [];
+  for (let round = 1; round <= options.tests; round++) {
+    const { rows: graded } = generateClass(items, {
+      students: options.students, seed: options.seed + round * 101, assessmentId: `과학6-2-연소-${round}회`, confirmEssays: true,
+    });
+    graded.forEach(row => rows.push(LONG_COLUMNS.map(column => row[column])));
+  }
+  return { id: "assessment", label: "평가 응답(성취기준 연결)", description: datasetCatalog[8].description, filename: "assessment_item_responses.csv", columns: [...LONG_COLUMNS], rows };
+}
+
 export function generateDatasets(options: GeneratorOptions, selected: DatasetId[]) {
   const makers: Record<DatasetId, (options: GeneratorOptions, random: () => number) => GeneratedDataset> = {
     achievement,
@@ -187,6 +208,7 @@ export function generateDatasets(options: GeneratorOptions, selected: DatasetId[
     portfolio,
     observation,
     collaboration,
+    assessment,
   };
   return selected.map((id, index) => makers[id](options, createRandom(options.seed + index * 977)));
 }
