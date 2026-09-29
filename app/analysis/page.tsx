@@ -1,63 +1,22 @@
 "use client";
 
-import { useMemo, useState, useSyncExternalStore } from "react";
+import Link from "next/link";
+import { useMemo } from "react";
 import { AppHeader } from "../components/AppHeader";
 import { classStandards, distractors, itemStats, studentStandards } from "../lib/assessment/analysis";
-import { loadAnswerKey } from "../lib/assessment/answerKey";
-import { parseCsv, toCsv } from "../lib/assessment/csv";
-import { LONG_COLUMNS, pendingCount, type LongRow } from "../lib/assessment/records";
-import { SAMPLE_KEY_CSV } from "../lib/assessment/sampleKey";
+import { toCsv } from "../lib/assessment/csv";
+import { pendingCount, type LongRow } from "../lib/assessment/records";
 import { STANDARDS } from "../lib/assessment/standards";
-import { generateClass } from "../lib/assessment/synthetic";
+import { parseDataset, useCurrentDatasetRaw } from "../lib/dataset";
 import { downloadBlob } from "../lib/generator";
 
-type Loaded = { name: string; rows: LongRow[] };
-
-const noopSubscribe = () => () => {};
 const pct = (v: number | null | undefined) => (v == null ? "–" : `${Math.round(v * 100)}%`);
 
-function toRows(text: string): LongRow[] {
-  const { columns, rows } = parseCsv(text);
-  const missing = LONG_COLUMNS.filter(c => !columns.includes(c));
-  if (missing.length) throw new Error(`평가 응답 CSV가 아닙니다. 없는 열: ${missing.join(", ")}`);
-  return rows as LongRow[];
-}
-
 export default function AnalysisPage() {
-  const [loaded, setLoaded] = useState<Loaded | null>(null);
-  const [fileError, setFileError] = useState("");
-  // 채점 화면에서 넘어온 결과 (이 탭의 sessionStorage에만 있다)
-  const handoff = useSyncExternalStore(noopSubscribe, () => sessionStorage.getItem("statetistic:assessmentCsv"), () => null);
-  const fromHandoff = useMemo(() => {
-    if (!handoff) return { data: null, error: "" };
-    try {
-      return { data: { name: "채점 결과", rows: toRows(handoff) }, error: "" };
-    } catch (e) {
-      return { data: null, error: e instanceof Error ? e.message : String(e) };
-    }
-  }, [handoff]);
-  const data = loaded ?? fromHandoff.data;
-  const error = fileError || (loaded ? "" : fromHandoff.error);
-
-  function setData(next: Loaded) {
-    setLoaded(next);
-    setFileError("");
-  }
-
-  async function handleFile(file?: File) {
-    if (!file) return;
-    try {
-      setData({ name: file.name, rows: toRows(await file.text()) });
-    } catch (e) {
-      setFileError(e instanceof Error ? e.message : String(e));
-    }
-  }
-
-  function practice() {
-    const items = loadAnswerKey(SAMPLE_KEY_CSV);
-    const seed = Math.floor(Math.random() * 100000);
-    setData({ name: `합성 반 (seed ${seed})`, rows: generateClass(items, { students: 25, seed, assessmentId: "합성-6과-연소", confirmEssays: true }).rows });
-  }
+  // 분석은 데이터를 들여오지 않는다. ① 데이터 준비에서 등록한 현재 데이터만 읽는다.
+  const raw = useCurrentDatasetRaw();
+  const dataset = useMemo(() => parseDataset(raw), [raw]);
+  const data = useMemo(() => (dataset?.assessment ? { name: dataset.name, rows: dataset.rows as LongRow[] } : null), [dataset]);
 
   const analysis = useMemo(() => {
     if (!data) return null;
@@ -66,41 +25,22 @@ export default function AnalysisPage() {
     return { items, per, cls: classStandards(per), dist: distractors(data.rows), pending: pendingCount(data.rows) };
   }, [data]);
 
-  function sendToStudio() {
-    if (!data) return;
-    sessionStorage.setItem("statetistic:handoffCsv", toCsv([...LONG_COLUMNS], data.rows));
-    sessionStorage.setItem("statetistic:handoffName", `${data.name}.csv`);
-    window.location.href = "/studio";
-  }
-
   return (
     <main>
       <AppHeader active="analysis" title="평가 분석" description="성취기준을 기준으로 문항·오답·학생별 근거를 봅니다. 성취수준은 교사가 판정합니다." />
       <div className="grading-page">
-        <section className="studio-intro">
-          <div>
-            <span className="studio-kicker">STATEtistic / ASSESSMENT</span>
-            <h2>점수가 아니라<br /><em>성취기준의 근거로.</em></h2>
-          </div>
-          <div className="analysis-load">
-            <label className="upload-drop">
-              <input type="file" accept=".csv,text/csv" onChange={e => handleFile(e.target.files?.[0])} />
-              <b>응답_long.csv 불러오기</b>
-              <span>{data ? `${data.name} · ${new Set(data.rows.map(r => r.학생코드)).size}명 · ${data.rows.length}행` : "채점 화면에서 넘어오거나 파일을 선택하세요"}</span>
-            </label>
-            <button className="secondary-action" onClick={practice}>합성 반으로 연습하기</button>
-          </div>
-        </section>
-        {error && <div className="model-error">{error}</div>}
+        {!dataset && <EmptyState title="분석할 데이터가 없습니다" body="① 데이터 준비에서 데이터를 만들거나 불러오면 여기서 바로 분석됩니다." />}
+        {dataset && !dataset.assessment && <EmptyState title="평가 분석에 쓸 수 없는 형식입니다" body={`현재 데이터(${dataset.name})는 문항 단위 응답이 아닙니다. 시험지 채점 결과나 합성 데이터의 "평가 응답"을 쓰거나, 이 데이터는 시각화 · 예측에서 보세요.`} studio />}
 
         {analysis && data && <>
           <div className="kpi-grid">
+            <div className="kpi"><span>데이터</span><strong className="kpi-name">{data.name}</strong><small>{dataset?.real ? "실제 학생 자료" : "합성 데이터"}</small></div>
             <div className="kpi"><span>응시 학생</span><strong>{new Set(data.rows.map(r => r.학생코드)).size}명</strong></div>
             <div className="kpi"><span>문항</span><strong>{analysis.items.length}개</strong><small>성취기준 {analysis.cls.length}개</small></div>
             <div className="kpi"><span>교사 확인 대기</span><strong>{analysis.pending}건</strong><small className={analysis.pending ? "negative" : ""}>{analysis.pending ? "확정 전 문항은 정답률을 비워 둡니다" : "모두 확정됨"}</small></div>
-            <div className="kpi"><span>자동 채점 비율</span><strong>{pct(data.rows.filter(r => r.채점방식 === "자동").length / data.rows.length)}</strong><small>나머지는 교사 확정</small></div>
           </div>
 
+          <p className="warn-note">이 화면은 성취수준(A·B·C)을 판정하지 않습니다. 각 성취기준의 성취수준 기술과 관련 문항의 행동영역을 비교해, 서술형·수행평가 근거가 더 필요한지 교사가 판단하세요.</p>
           <h3 className="section-title">성취기준별 근거</h3>
           <div className="standard-grid">
             {analysis.cls.map(c => {
@@ -111,7 +51,6 @@ export default function AnalysisPage() {
                 <div className="rate-bar"><i style={{ width: pct(c.평균득점률) }} /><em>반 평균 득점률 {pct(c.평균득점률)}</em></div>
                 <p>관련 문항 {c.문항수}개 · 행동영역 {c.행동영역 || "–"} · 절반 미만 {c.절반미만학생수}명{weak.length ? `: ${weak.map(w => w.학생코드).join(", ")}` : ""}</p>
                 {s && <details><summary>성취수준 기술 (비교용)</summary><dl>{(["A", "B", "C"] as const).map(k => <div key={k}><dt>{k}</dt><dd>{s.levels[k]}</dd></div>)}</dl><small>{s.source}</small></details>}
-                <p className="warn-note">이 평가의 문항만으로 성취수준을 판정하지 않습니다. 위 기술과 행동영역을 비교해 서술형·수행평가 근거가 더 필요한지 판단하세요.</p>
               </article>;
             })}
           </div>
@@ -134,7 +73,7 @@ export default function AnalysisPage() {
           <StudentMatrix per={analysis.per} standards={analysis.cls.map(c => c.성취기준)} />
 
           <div className="grading-actions">
-            <button className="primary-action" onClick={sendToStudio}>시각화 · TabPFN으로 보내기</button>
+            <Link className="primary-action" href="/studio">같은 데이터로 시각화 · 예측 →</Link>
             <button className="secondary-action" onClick={() => downloadBlob(`﻿${toCsv(Object.keys(analysis.items[0] ?? {}), analysis.items)}`, "문항분석.csv", "text/csv")}>문항분석.csv</button>
             <button className="secondary-action" onClick={() => downloadBlob(`﻿${toCsv(Object.keys(analysis.per[0] ?? {}), analysis.per)}`, "학생별_성취기준.csv", "text/csv")}>학생별_성취기준.csv</button>
           </div>
@@ -142,6 +81,12 @@ export default function AnalysisPage() {
       </div>
     </main>
   );
+}
+
+function EmptyState({ title, body, studio }: { title: string; body: string; studio?: boolean }) {
+  return <section className="studio-empty"><span>DATA</span><h3>{title}</h3><p>{body}</p>
+    <div className="empty-links"><Link href="/grading">시험지 채점</Link><Link href="/">합성 데이터 생성</Link><Link href="/import">CSV 가져오기</Link>{studio && <Link href="/studio">시각화 · 예측</Link>}</div>
+  </section>;
 }
 
 function StudentMatrix({ per, standards }: { per: ReturnType<typeof studentStandards>; standards: string[] }) {

@@ -33,11 +33,17 @@ function StepBar() {
   const g = useGrading();
   const pathname = usePathname();
   const router = useRouter();
-  const done = [g.roster.length > 0, g.items.length > 0, g.approved, Object.keys(g.readings).length > 0, g.result != null && g.result.rows.every(r => r.정오 !== ""), false];
+  const done = [
+    g.roster.length > 0,
+    g.items.length > 0,
+    g.approved,
+    Object.keys(g.readings).length > 0 && g.failedCodes.length === 0,
+    g.result != null && g.result.rows.every(r => r.정오 !== "" && !r.표시.includes("판독확인필요")),
+    false,
+  ];
 
   async function demo() {
-    await g.startDemo();
-    router.push("/grading/photos");
+    if (await g.startDemo()) router.push("/grading/photos");
   }
 
   return (

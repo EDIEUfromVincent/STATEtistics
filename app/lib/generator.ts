@@ -44,7 +44,7 @@ export const datasetCatalog: Array<{ id: DatasetId; label: string; description: 
   { id: "portfolio", label: "포트폴리오/프로젝트", description: "루브릭·동료평가·프로젝트 산출물" },
   { id: "observation", label: "관찰기록", description: "주차별 참여도·이해도·정성 메모" },
   { id: "collaboration", label: "협업활동", description: "모둠·역할·기여도·상호작용" },
-  { id: "assessment", label: "평가 응답(성취기준 연결)", description: "문항별 응답·자동 채점·성취기준·행동영역 — 채점 화면과 같은 형식 (예시: 6학년 과학 연소)" },
+  { id: "assessment", label: "평가 응답 예시 (6학년 과학 · 연소)", description: "위에서 고른 과목과 무관하게 6학년 과학 '물질의 연소' 예시 정답표로 만든다. 문항별 응답·자동 채점·성취기준 — 채점 화면과 같은 형식" },
 ];
 
 const firstNames = ["서윤", "도윤", "하린", "민준", "시우", "지우", "유진", "은호", "예린", "선우", "하율", "주원", "윤서", "지민", "현우", "다은", "수빈", "준서", "아인", "태윤"];
@@ -195,7 +195,7 @@ function assessment(options: GeneratorOptions): GeneratedDataset {
     });
     graded.forEach(row => rows.push(LONG_COLUMNS.map(column => row[column])));
   }
-  return { id: "assessment", label: "평가 응답(성취기준 연결)", description: datasetCatalog[8].description, filename: "assessment_item_responses.csv", columns: [...LONG_COLUMNS], rows };
+  return { id: "assessment", label: datasetCatalog[8].label, description: datasetCatalog[8].description, filename: "assessment_item_responses.csv", columns: [...LONG_COLUMNS], rows };
 }
 
 export function generateDatasets(options: GeneratorOptions, selected: DatasetId[]) {

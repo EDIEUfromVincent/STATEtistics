@@ -18,7 +18,23 @@ export function geminiConfig() {
     // 무료 등급은 입력 데이터가 제품 개선에 쓰일 수 있어 학생 자료에 쓰지 않는다
     paidTier: process.env.GEMINI_PAID_TIER?.trim().toLowerCase() === "true",
     accessKeySet: Boolean(process.env.STATETISTIC_ACCESS_KEY?.trim()),
+    // 요금표 기준 추정용 (USD per 1M tokens). 실제 청구액은 Google Cloud 결제 화면이 기준이다
+    priceInputPerM: Number(process.env.GEMINI_PRICE_INPUT_PER_M) || 0.3,
+    priceOutputPerM: Number(process.env.GEMINI_PRICE_OUTPUT_PER_M) || 2.5,
+    usdKrw: Number(process.env.USD_KRW) || 1400,
   };
+}
+
+/**
+ * 글씨를 옮겨 적는 일에는 '생각' 토큰이 필요 없다. 생각 토큰은 출력 요금으로 청구되므로 끈다.
+ * gemini-2.5 flash 계열은 thinkingBudget 0으로 끌 수 있다(2.5 pro는 끌 수 없음).
+ * 다른 모델은 GEMINI_THINKING_BUDGET으로 직접 정한다.
+ */
+function thinkingConfig(model: string) {
+  const env = process.env.GEMINI_THINKING_BUDGET?.trim();
+  if (env) return { thinkingBudget: Number(env) };
+  if (/^gemini-2\.5-flash/.test(model)) return { thinkingBudget: 0 };
+  return undefined;
 }
 
 /** 학생 자료를 다루므로 접속 코드가 설정되지 않았으면 열어 두지 않는다 (fail closed). */
@@ -40,7 +56,7 @@ export function assertReady(request: Request) {
 
 const hits = new Map<string, number[]>();
 const WINDOW_MS = 10 * 60_000;
-const MAX_REQUESTS = 300; // 한 반 25명 × 3쪽 + 서술형 여유
+const MAX_REQUESTS = 300; // 학생 1명당 판독 1번 + 서술형 여유 (여러 반을 연달아 채점해도 넉넉하게)
 
 function rateLimit(request: Request) {
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
@@ -61,28 +77,44 @@ export async function sha256(bytes: Uint8Array) {
 }
 
 type Schema = Record<string, unknown>;
+export type Usage = { input: number; output: number; thoughts: number };
 
-export async function callGemini(cfg: ReturnType<typeof geminiConfig>, parts: unknown[], schema: Schema) {
+export async function callGemini(cfg: ReturnType<typeof geminiConfig>, parts: unknown[], schema: Schema): Promise<{ data: Record<string, unknown>; usage: Usage }> {
+  const thinking = thinkingConfig(cfg.model);
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cfg.model)}:generateContent`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": cfg.apiKey },
     body: JSON.stringify({
       contents: [{ role: "user", parts }],
-      generationConfig: { temperature: 0, responseMimeType: "application/json", responseSchema: schema },
+      generationConfig: {
+        temperature: 0, responseMimeType: "application/json", responseSchema: schema,
+        ...(thinking ? { thinkingConfig: thinking } : {}),
+      },
     }),
     signal: AbortSignal.timeout(120_000),
   });
   if (!response.ok) {
-    if (response.status === 401 || response.status === 403) throw new AssessmentApiError("GEMINI_API_KEY가 유효하지 않거나 권한이 없습니다.", 503);
+    const detail = await response.text().catch(() => "");
+    // 잘못된 키는 400으로 온다
+    if (response.status === 401 || response.status === 403 || /API_KEY_INVALID|API key not valid/i.test(detail)) {
+      throw new AssessmentApiError("GEMINI_API_KEY가 유효하지 않거나 권한이 없습니다. Railway 변수를 확인해 주세요.", 503);
+    }
     if (response.status === 429) throw new AssessmentApiError("Gemini 사용 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.", 429);
     if (response.status === 404) throw new AssessmentApiError(`Gemini 모델 '${cfg.model}'을 찾을 수 없습니다. GEMINI_MODEL을 확인해 주세요.`, 503);
     throw new AssessmentApiError("Gemini 요청에 실패했습니다.", 502);
   }
   const payload = await response.json();
-  const text = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (typeof text !== "string") throw new AssessmentApiError("Gemini가 빈 응답을 반환했습니다.", 502);
+  const outParts = (payload?.candidates?.[0]?.content?.parts ?? []) as Array<{ text?: string; thought?: boolean }>;
+  const text = outParts.filter(p => !p.thought && typeof p.text === "string").map(p => p.text).join("");
+  if (!text) throw new AssessmentApiError("Gemini가 빈 응답을 반환했습니다.", 502);
+  const meta = payload?.usageMetadata ?? {};
+  const usage: Usage = {
+    input: Number(meta.promptTokenCount) || 0,
+    output: Number(meta.candidatesTokenCount) || 0,
+    thoughts: Number(meta.thoughtsTokenCount) || 0,
+  };
   try {
-    return JSON.parse(text) as Record<string, unknown>;
+    return { data: JSON.parse(text) as Record<string, unknown>, usage };
   } catch {
     throw new AssessmentApiError("Gemini 응답을 해석하지 못했습니다.", 502);
   }
@@ -117,8 +149,9 @@ function itemLine(s: OcrItemSpec) {
   return `- ${s.no}번: ${s.kind} (${extra[s.kind]})`;
 }
 
-export function readPrompt(specs: OcrItemSpec[]) {
-  return `이 이미지는 초등학생 시험지의 한 쪽입니다. 아래 문항에 학생이 직접 쓰거나 표시한 답을 보이는 그대로 옮겨 적으세요.
+export function readPrompt(specs: OcrItemSpec[], pageCount: number) {
+  return `이 이미지 ${pageCount}장은 초등학생 한 명의 시험지 1~${pageCount}쪽입니다. 아래 문항에 학생이 직접 쓰거나 표시한 답을 보이는 그대로 옮겨 적으세요.
+- 문항이 어느 쪽에 있든 찾아서 답합니다. 한 문항이 두 쪽에 걸쳐 있으면 학생이 표시한 곳을 따릅니다.
 - 채점하거나 맞춤법을 고치지 마세요. 틀린 답도 그대로 적습니다.
 - 인쇄된 문제 글과 보기는 답이 아닙니다. 학생이 동그라미 친 보기 번호는 ③처럼 적습니다.
 - ○/× 문항은 칸 순서대로 '○,○,×'처럼 적습니다.

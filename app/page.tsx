@@ -1,8 +1,10 @@
 "use client";
 
 import JSZip from "jszip";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { AppHeader } from "./components/AppHeader";
+import { isAssessmentCsv, setCurrentDataset } from "./lib/dataset";
 import {
   datasetCatalog,
   datasetToCsv,
@@ -21,6 +23,7 @@ const schools = [
 const subjects = ["국어", "수학", "과학", "사회", "영어", "실과", "음악", "미술", "체육"];
 
 export default function GeneratorPage() {
+  const router = useRouter();
   const [school, setSchool] = useState("초등");
   const [subject, setSubject] = useState("국어");
   const [grade, setGrade] = useState(3);
@@ -47,9 +50,6 @@ export default function GeneratorPage() {
     const result = generateDatasets({ school, subject, grade, classNo, unit, students, weeks, tests, seed }, selected);
     setGenerated(result);
     setActiveId(result[0].id);
-    const csv = datasetToCsv(result[0]);
-    localStorage.setItem("statetistic:lastCsv", csv);
-    localStorage.setItem("statetistic:lastName", result[0].filename);
   }
 
   async function downloadAll() {
@@ -66,11 +66,11 @@ export default function GeneratorPage() {
     setTimeout(() => setCopied(false), 1400);
   }
 
-  function openStudio() {
+  /** 보고 있는 데이터셋을 현재 데이터로 등록하고, 형식에 맞는 분석 화면으로 간다 */
+  function analyze() {
     if (!active) return;
-    localStorage.setItem("statetistic:lastCsv", datasetToCsv(active));
-    localStorage.setItem("statetistic:lastName", active.filename);
-    window.location.href = "/studio";
+    setCurrentDataset({ name: `합성 · ${active.label}`, source: "합성", real: false, csv: datasetToCsv(active) });
+    router.push(isAssessmentCsv(active.columns) ? "/analysis" : "/studio");
   }
 
   return (
@@ -78,7 +78,7 @@ export default function GeneratorPage() {
       <AppHeader
         active="generate"
         title="합성 데이터 생성기"
-        description="조건을 설계하고 8종의 교육·행동 데이터를 CSV로 생성해 나만의 분석을 시작하세요."
+        description="조건을 설계하고 교육·행동 데이터를 만들어 분석을 연습하세요. 실제 개인 정보는 쓰지 않습니다."
       />
       <div className="generator-shell">
         <aside className="generator-panel">
@@ -95,7 +95,7 @@ export default function GeneratorPage() {
             <NumberField label="난수 시드" value={seed} onChange={setSeed} min={1} max={999999} full />
           </div>
 
-          <div className="panel-kicker dataset-kicker">02 · DATASETS <span>{selected.length}/8</span></div>
+          <div className="panel-kicker dataset-kicker">02 · DATASETS <span>{selected.length}/{datasetCatalog.length}</span></div>
           <div className="dataset-selector">
             {datasetCatalog.map(item => (
               <label key={item.id} className={selected.includes(item.id) ? "dataset-option checked" : "dataset-option"}>
@@ -123,7 +123,7 @@ export default function GeneratorPage() {
               <div className="empty-mark">S</div>
               <h2>분석 가능한 데이터를 직접 설계하세요</h2>
               <p>좌측에서 조건과 데이터셋을 고른 뒤 <b>데이터 생성</b>을 누르세요.</p>
-              <div className="empty-steps"><span>1 조건 설정</span><i>→</i><span>2 CSV 생성</span><i>→</i><span>3 시각화·예측</span></div>
+              <div className="empty-steps"><span>1 조건 설정</span><i>→</i><span>2 데이터 생성</span><i>→</i><span>3 분석하기</span></div>
             </div>
           ) : (
             <>
@@ -131,7 +131,7 @@ export default function GeneratorPage() {
                 <div><span>GENERATED</span><strong>{generated.reduce((sum, d) => sum + d.rows.length, 0).toLocaleString()}</strong><small>총 데이터 행</small></div>
                 <div><span>DATASETS</span><strong>{generated.length}</strong><small>생성된 CSV</small></div>
                 <div><span>ACTIVE</span><strong>{active.rows.length.toLocaleString()}</strong><small>{active.label} 행</small></div>
-                <button onClick={openStudio}>시각화 스튜디오에서 열기 <b>↗</b></button>
+                <button onClick={analyze}>이 데이터로 분석하기 <b>→</b></button>
               </div>
               <div className="dataset-tabs">
                 {generated.map(dataset => <button key={dataset.id} className={dataset.id === active.id ? "active" : ""} onClick={() => setActiveId(dataset.id)}>{dataset.label}<small>{dataset.rows.length}</small></button>)}

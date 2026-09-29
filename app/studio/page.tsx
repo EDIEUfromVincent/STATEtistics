@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AppHeader } from "../components/AppHeader";
+import { parseDataset, useCurrentDatasetRaw } from "../lib/dataset";
 
 type Row = Record<string, string>;
 type ParsedCsv = { name: string; columns: string[]; rows: Row[] };
@@ -15,35 +16,9 @@ type ModelResult = {
   metrics: Record<string, number>;
   predictions: Array<{ actual: string | number; predicted: string | number; confidence?: number }>;
 };
+type Selection = { for: string | null; x: string; y: string; chart: string; target: string; features: string[] };
 
-function parseCsv(text: string, name = "dataset.csv"): ParsedCsv {
-  const records: string[][] = [];
-  let row: string[] = [];
-  let value = "";
-  let quoted = false;
-  const source = text.replace(/^\uFEFF/, "");
-  for (let i = 0; i < source.length; i++) {
-    const char = source[i];
-    if (char === '"' && quoted && source[i + 1] === '"') { value += '"'; i++; continue; }
-    if (char === '"') { quoted = !quoted; continue; }
-    if (char === "," && !quoted) { row.push(value); value = ""; continue; }
-    if ((char === "\n" || char === "\r") && !quoted) {
-      if (char === "\r" && source[i + 1] === "\n") i++;
-      row.push(value); value = "";
-      if (row.some(cell => cell.length)) records.push(row);
-      row = [];
-      continue;
-    }
-    value += char;
-  }
-  if (value.length || row.length) { row.push(value); records.push(row); }
-  const columns = records[0] ?? [];
-  return {
-    name,
-    columns,
-    rows: records.slice(1).map(values => Object.fromEntries(columns.map((column, index) => [column, values[index] ?? ""]))),
-  };
-}
+const ACCESS_KEY = "statetistic:accessKey";
 
 function isNumericColumn(rows: Row[], column: string) {
   const present = rows.map(row => row[column]).filter(value => value !== "");
@@ -67,12 +42,23 @@ function defaultFeatures(parsed: ParsedCsv, target: string) {
   return parsed.columns.filter(column => column !== target && !excludedReason(parsed.rows, column));
 }
 
+function defaultSelection(data: ParsedCsv | null, raw: string | null): Selection {
+  if (!data) return { for: raw, x: "", y: "", chart: "scatter", target: "", features: [] };
+  const numeric = data.columns.filter(column => isNumericColumn(data.rows, column));
+  // 평가 응답이면 "정오"를 예측하는 것이 자연스럽다. 그 밖에는 마지막 열
+  const target = data.columns.includes("정오") ? "정오" : data.columns[data.columns.length - 1] ?? "";
+  // 평가 응답이면 문항별 평균 점수 막대가 첫 화면으로 알맞다
+  if (["문항", "점수", "정오"].every(c => data.columns.includes(c))) {
+    return { for: raw, x: "문항", y: "점수", chart: "bar", target, features: defaultFeatures(data, target) };
+  }
+  return { for: raw, x: data.columns[0] ?? "", y: numeric[0] ?? data.columns[1] ?? "", chart: "scatter", target, features: defaultFeatures(data, target) };
+}
+
 export default function StudioPage() {
-  const [data, setData] = useState<ParsedCsv | null>(null);
-  const [xColumn, setXColumn] = useState("");
-  const [yColumn, setYColumn] = useState("");
-  const [chartType, setChartType] = useState("scatter");
-  const [target, setTarget] = useState("");
+  // 분석은 데이터를 들여오지 않는다. ① 데이터 준비에서 등록한 현재 데이터만 읽는다.
+  const raw = useCurrentDatasetRaw();
+  const dataset = useMemo(() => parseDataset(raw), [raw]);
+  const data = useMemo<ParsedCsv | null>(() => (dataset ? { name: dataset.name, columns: dataset.columns, rows: dataset.rows } : null), [dataset]);
   const [task, setTask] = useState("classification");
   const [service, setService] = useState<"checking" | "online" | "offline">("checking");
   const [running, setRunning] = useState(false);
@@ -80,38 +66,28 @@ export default function StudioPage() {
   const [error, setError] = useState("");
   const [serviceMessage, setServiceMessage] = useState("");
   const [requiresAccessKey, setRequiresAccessKey] = useState(false);
-  const [features, setFeatures] = useState<string[]>([]);
-  const [accessKey, setAccessKey] = useState(() =>
-    typeof window === "undefined" ? "" : localStorage.getItem("statetistic:accessKey") ?? "",
-  );
+  // 접속 코드는 탭을 닫으면 사라지게 둔다 (공용 PC에 남지 않게)
+  const [accessKey, setAccessKey] = useState(() => (typeof window === "undefined" ? "" : sessionStorage.getItem(ACCESS_KEY) ?? ""));
+  const [saved, setSaved] = useState<Selection | null>(null);
 
   useEffect(() => {
-    // 평가 분석에서 넘어온 실제 데이터는 이 탭(sessionStorage)에만 두고 브라우저에 남기지 않는다
-    const handoff = sessionStorage.getItem("statetistic:handoffCsv");
-    const stored = handoff ?? localStorage.getItem("statetistic:lastCsv");
-    const name = handoff ? sessionStorage.getItem("statetistic:handoffName") : localStorage.getItem("statetistic:lastName");
-    if (stored) loadData(parseCsv(stored, name ?? "generated.csv"));
+    localStorage.removeItem(ACCESS_KEY);
+    localStorage.removeItem("statetistic:lastCsv"); // 예전 버전이 브라우저에 남긴 데이터를 지운다
+    localStorage.removeItem("statetistic:lastName");
     checkService();
   }, []);
 
+  // 현재 데이터가 바뀌면 열 선택을 그 데이터에 맞는 기본값으로 다시 잡는다
+  const selection = saved && saved.for === raw ? saved : defaultSelection(data, raw);
+  const { x: xColumn, y: yColumn, chart: chartType, target, features } = selection;
+  const update = (patch: Partial<Selection>) => setSaved({ ...selection, ...patch, for: raw });
+  const setChartType = (chart: string) => update({ chart });
+  const setXColumn = (x: string) => update({ x });
+  const setYColumn = (y: string) => update({ y });
+  const setTarget = (value: string) => update({ target: value, features: data ? defaultFeatures(data, value) : [] });
+  const setFeatures = (f: (current: string[]) => string[]) => update({ features: f(features) });
+
   const numericColumns = useMemo(() => data?.columns.filter(column => isNumericColumn(data.rows, column)) ?? [], [data]);
-
-  function loadData(parsed: ParsedCsv) {
-    setData(parsed);
-    const numeric = parsed.columns.filter(column => isNumericColumn(parsed.rows, column));
-    setXColumn(parsed.columns[0] ?? "");
-    setYColumn(numeric[0] ?? parsed.columns[1] ?? "");
-    const nextTarget = parsed.columns[parsed.columns.length - 1] ?? "";
-    setTarget(nextTarget);
-    setFeatures(defaultFeatures(parsed, nextTarget));
-    setResult(null);
-    setError("");
-  }
-
-  async function handleFile(file?: File) {
-    if (!file) return;
-    loadData(parseCsv(await file.text(), file.name));
-  }
 
   async function checkService() {
     setService("checking");
@@ -130,11 +106,12 @@ export default function StudioPage() {
 
   function updateAccessKey(value: string) {
     setAccessKey(value);
-    localStorage.setItem("statetistic:accessKey", value);
+    sessionStorage.setItem(ACCESS_KEY, value);
   }
 
   async function runTabPFN() {
     if (!data || !target) return;
+    if (dataset?.real && !confirm(`실제 학생 자료입니다. 체크한 열 ${features.length}개와 목표 열(${target})이 Prior Labs(외부)로 전송됩니다. 계속할까요?`)) return;
     setRunning(true);
     setError("");
     setResult(null);
@@ -161,22 +138,10 @@ export default function StudioPage() {
 
   return (
     <main>
-      <AppHeader active="studio" title="Visualization & TabPFN Studio" description="생성한 CSV 또는 내 데이터를 불러와 즉석에서 탐색하고 표형 데이터 예측을 실행하세요." />
+      <AppHeader active="studio" title="시각화 · 예측" description="현재 데이터로 차트를 그리고 TabPFN 예측을 실행합니다. 예측만 외부(Prior Labs)로 전송됩니다." />
       <div className="studio-page">
-        <section className="studio-intro">
-          <div>
-            <span className="studio-kicker">STATEtistic / ANALYSIS WORKBENCH</span>
-            <h2>CSV에서 인사이트까지,<br /><em>한 화면에서.</em></h2>
-          </div>
-          <label className="upload-drop">
-            <input type="file" accept=".csv,text/csv" onChange={event => handleFile(event.target.files?.[0])} />
-            <b>CSV 불러오기</b>
-            <span>{data ? `${data.name} · ${data.rows.length.toLocaleString()}행 × ${data.columns.length}열` : "파일을 선택하거나 생성기에서 데이터를 보내세요"}</span>
-          </label>
-        </section>
-
         {!data ? (
-          <section className="studio-empty"><span>CSV</span><h3>분석할 데이터가 아직 없습니다</h3><p>CSV를 업로드하거나 데이터 생성기에서 “시각화 스튜디오에서 열기”를 선택하세요.</p><Link href="/">데이터 생성기로 이동</Link></section>
+          <section className="studio-empty"><span>DATA</span><h3>분석할 데이터가 없습니다</h3><p>① 데이터 준비에서 데이터를 만들거나 불러오면 여기서 바로 쓸 수 있습니다.</p><div className="empty-links"><Link href="/">합성 데이터 생성</Link><Link href="/grading">시험지 채점</Link><Link href="/import">CSV 가져오기</Link></div></section>
         ) : (
           <div className="studio-grid">
             <section className="studio-card visualize-card">
@@ -187,7 +152,7 @@ export default function StudioPage() {
                 <label>Y축<select value={yColumn} onChange={event => setYColumn(event.target.value)}>{numericColumns.map(column => <option key={column}>{column}</option>)}</select></label>
               </div>
               <CustomChart data={data} xColumn={xColumn} yColumn={yColumn} type={chartType} />
-              <div className="chart-caption"><span>{xColumn}</span><i>×</i><span>{yColumn}</span><small>최대 120개 관측치 표시</small></div>
+              <div className="chart-caption"><span>{xColumn}</span><i>×</i><span>{yColumn}</span><small>{chartType === "bar" || chartType === "histogram" ? `전체 ${data.rows.length.toLocaleString()}행으로 계산` : "점은 최대 120개 표시"}</small></div>
             </section>
 
             <section className="studio-card tabpfn-card">
@@ -197,7 +162,7 @@ export default function StudioPage() {
               </header>
               <div className="model-controls">
                 <label>문제 유형<select value={task} onChange={event => setTask(event.target.value)}><option value="classification">분류</option><option value="regression">회귀</option></select></label>
-                <label>예측할 목표 열<select value={target} onChange={event => { setTarget(event.target.value); setFeatures(defaultFeatures(data, event.target.value)); }}>{data.columns.map(column => <option key={column}>{column}</option>)}</select></label>
+                <label>예측할 목표 열<select value={target} onChange={event => setTarget(event.target.value)}>{data.columns.map(column => <option key={column}>{column}</option>)}</select></label>
               </div>
               <div className="feature-picker" aria-label="전송할 입력 열">
                 {data.columns.filter(column => column !== target).map(column => {
@@ -205,7 +170,7 @@ export default function StudioPage() {
                   return <label key={column} title={reason ? `기본 제외: ${reason}` : ""}><input type="checkbox" checked={features.includes(column)} onChange={event => setFeatures(current => event.target.checked ? [...current, column] : current.filter(v => v !== column))} />{column}{reason && <small> ({reason})</small>}</label>;
                 })}
               </div>
-              {requiresAccessKey && <label className="access-key-control">분석 액세스 코드<input type="password" autoComplete="off" value={accessKey} onChange={event => updateAccessKey(event.target.value)} placeholder="이 브라우저에만 저장됩니다" /></label>}
+              {requiresAccessKey && <label className="access-key-control">분석 액세스 코드<input type="password" autoComplete="off" value={accessKey} onChange={event => updateAccessKey(event.target.value)} placeholder="이 탭을 닫으면 지워집니다" /></label>}
               <div className="model-spec">
                 <div><span>TRAIN</span><b>75%</b></div><div><span>TEST</span><b>25%</b></div><div><span>FEATURES</span><b>{features.length}</b></div><div><span>ROWS</span><b>{data.rows.length}</b></div>
               </div>
@@ -213,7 +178,7 @@ export default function StudioPage() {
               {service === "offline" && <div className="engine-guide"><strong>TabPFN API 설정을 확인하세요</strong><code>Railway Variables → PRIORLABS_API_KEY</code><small>{serviceMessage || "API 키는 브라우저나 GitHub에 노출되지 않고 STATEtistic 서버에서만 사용됩니다."}</small></div>}
               {error && <div className="model-error">{error}</div>}
               {result && <ModelResults result={result} />}
-              <p className="license-note">체크한 열 {features.length}개와 목표 열만 예측을 위해 Prior Labs API(외부)로 전송됩니다. 식별자·자유 서술 열은 기본으로 빠져 있습니다. 실제 학생 자료라면 전송 전에 열 목록을 다시 확인하세요.</p>
+              <p className={dataset?.real ? "warn-note" : "license-note"}>{dataset?.real ? "실제 학생 자료입니다. " : ""}체크한 열 {features.length}개와 목표 열만 예측을 위해 Prior Labs API(외부)로 전송됩니다. 식별자·자유 서술 열은 기본으로 빠져 있습니다.</p>
             </section>
           </div>
         )}
@@ -223,7 +188,9 @@ export default function StudioPage() {
 }
 
 function CustomChart({ data, xColumn, yColumn, type }: { data: ParsedCsv; xColumn: string; yColumn: string; type: string }) {
-  const rows = data.rows.slice(0, 120).filter(row => Number.isFinite(Number(row[yColumn])));
+  // 평균·분포는 전체 행으로 계산한다. 점을 찍는 차트만 화면이 넘치지 않게 120개로 줄인다
+  const limit = type === "bar" || type === "histogram" ? data.rows.length : 120;
+  const rows = data.rows.slice(0, limit).filter(row => row[yColumn] !== "" && Number.isFinite(Number(row[yColumn])));
   if (!rows.length) return <div className="chart-no-data">선택한 Y축에 숫자 데이터가 없습니다.</div>;
   const values = rows.map(row => Number(row[yColumn]));
   const minY = Math.min(...values);
@@ -241,8 +208,12 @@ function CustomChart({ data, xColumn, yColumn, type }: { data: ParsedCsv; xColum
   if (type === "bar") {
     const groups = new Map<string, number[]>();
     rows.forEach(row => groups.set(row[xColumn], [...(groups.get(row[xColumn]) ?? []), Number(row[yColumn])]));
-    const entries = Array.from(groups).slice(0, 10).map(([label, group]) => ({ label, value: group.reduce((a, b) => a + b, 0) / group.length }));
-    return <svg className="custom-chart" viewBox="0 0 620 270" role="img" aria-label={`${xColumn}별 ${yColumn} 평균`}>{entries.map((entry, i) => <g key={entry.label}><rect x={40 + i * 56} y={y(entry.value)} width="38" height={230 - y(entry.value)} rx="4" fill={i % 2 ? "#23a19b" : "#3758d3"} /><text x={59 + i * 56} y="252" className="studio-axis">{entry.label.slice(0, 6)}</text></g>)}</svg>;
+    const entries = Array.from(groups)
+      .sort((a, b) => (Number(a[0]) - Number(b[0])) || a[0].localeCompare(b[0]))
+      .slice(0, 24)
+      .map(([label, group]) => ({ label, value: group.reduce((a, b) => a + b, 0) / group.length }));
+    const step = 560 / Math.max(1, entries.length);
+    return <svg className="custom-chart" viewBox="0 0 620 270" role="img" aria-label={`${xColumn}별 ${yColumn} 평균`}>{entries.map((entry, i) => <g key={entry.label}><rect x={40 + i * step} y={y(entry.value)} width={step * 0.68} height={230 - y(entry.value)} rx="4" fill={i % 2 ? "#23a19b" : "#3758d3"}><title>{entry.label}: {entry.value.toFixed(2)}</title></rect><text x={40 + i * step + step * 0.34} y="252" className="studio-axis">{entry.label.slice(0, 6)}</text></g>)}</svg>;
   }
 
   const xValues = categoricalX ? rows.map((_, index) => index) : rows.map(row => Number(row[xColumn]));

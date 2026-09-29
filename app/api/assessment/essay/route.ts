@@ -1,6 +1,7 @@
 import { AssessmentApiError, assertReady, audit, callGemini, errorResponse, GRADE_SCHEMA, gradePrompt } from "../_gemini";
 
-// 서술형 1차 채점 제안. 두 번 채점해서 다르면 표시한다. 점수 확정은 교사가 브라우저에서 한다.
+// 서술형 1차 채점 제안. 호출은 한 번만 한다. 일관성 확인은 교사가 "재확인"을 누를 때
+// 브라우저가 한 번 더 요청해 앞의 점수와 비교한다. 점수 확정은 교사가 한다.
 export async function POST(request: Request) {
   try {
     const cfg = assertReady(request);
@@ -12,16 +13,13 @@ export async function POST(request: Request) {
     if (!no || !Number.isFinite(points) || points <= 0 || points > 100 || !rubric || !answer) {
       throw new AssessmentApiError("채점 요청 정보가 올바르지 않습니다.", 400);
     }
-    await audit("assessment_essay", { item: no, chars: answer.length, model: cfg.model });
-
-    const prompt = [{ text: gradePrompt(no, points, rubric, answer) }];
-    const [first, second] = await Promise.all([callGemini(cfg, prompt, GRADE_SCHEMA), callGemini(cfg, prompt, GRADE_SCHEMA)]);
-    const clamp = (v: unknown) => Math.max(0, Math.min(points, Number(v) || 0));
+    const { data, usage } = await callGemini(cfg, [{ text: gradePrompt(no, points, rubric, answer) }], GRADE_SCHEMA);
+    await audit("assessment_essay", { item: no, chars: answer.length, model: cfg.model, usage });
     return Response.json({
-      score: clamp(first.score),
-      evidence: typeof first.evidence === "string" ? first.evidence.slice(0, 500) : "",
-      reason: typeof first.reason === "string" ? first.reason.slice(0, 500) : "",
-      unstable: clamp(first.score) !== clamp(second.score),
+      score: Math.max(0, Math.min(points, Number(data.score) || 0)),
+      evidence: typeof data.evidence === "string" ? data.evidence.slice(0, 500) : "",
+      reason: typeof data.reason === "string" ? data.reason.slice(0, 500) : "",
+      usage,
     });
   } catch (error) {
     return errorResponse(error);

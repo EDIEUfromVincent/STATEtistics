@@ -281,3 +281,32 @@ input[type=range] { width:100%; height:4px; margin-top:11px; accent-color:var(--
 .step-next { display:flex; align-items:center; gap:12px; margin-top:16px; }
 .step-next a.primary-action { text-decoration:none; }
 .grading-page .primary-action,.grading-page .secondary-action { width:auto; height:auto; margin:0; padding:10px 16px; display:inline-flex; align-items:center; text-decoration:none; }
+
+/* 현재 데이터 */
+.topbar-right { display:grid; justify-items:end; gap:8px; }
+.dataset-chip { display:flex; align-items:center; gap:8px; max-width:420px; padding:5px 6px 5px 8px; border:1px solid var(--line); border-radius:8px; background:#fafbfd; font-size:12px; color:#4a5470; }
+.dataset-chip.empty { color:#9aa2b1; padding:6px 10px; }
+.dataset-chip>span { padding:2px 7px; border-radius:5px; background:#e8f5f3; color:#17635f; font-weight:800; font-size:11px; }
+.dataset-chip.real>span { background:#fdecea; color:#b3261e; }
+.dataset-chip b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dataset-chip small { color:#8a91a0; white-space:nowrap; }
+.dataset-chip button { border:0; background:none; color:#9aa2b1; cursor:pointer; font-size:15px; line-height:1; padding:0 4px; }
+.empty-links { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-top:10px; }
+.empty-links a { padding:8px 13px; border-radius:7px; background:#edf1ff; color:var(--blue); text-decoration:none; font-weight:700; font-size:13px; }
+.kpi .kpi-name { font-size:15px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* 교사 확인 */
+.link-button { border:0; background:none; color:var(--blue); font-weight:700; cursor:pointer; padding:0 4px; font-size:12px; text-decoration:underline; }
+.link-button.on { color:var(--coral); }
+.link-button:disabled { color:#aeb4bf; cursor:not-allowed; }
+.review-split { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px; align-items:start; }
+.page-viewer { position:sticky; top:8px; max-height:80vh; overflow:auto; border:1px solid var(--line); border-radius:8px; padding:8px; background:#fafbfd; }
+.page-viewer header { display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px; }
+.page-viewer figure { margin:0 0 8px; }
+.page-viewer img { width:100%; border:1px solid #cfd5df; }
+.page-viewer figcaption { font-size:11px; color:#6f788b; text-align:center; }
+.essay-block { border-top:1px solid #eef0f4; padding-top:12px; margin-top:12px; }
+.rubric-box { background:#f6f8fd; border:1px solid #e3e8f5; border-radius:7px; padding:10px 12px; font-size:12px; color:#3a4460; }
+.rubric-box p { margin:6px 0 0; line-height:1.6; }
+.cell-input.wide { width:220px; }
+@media (max-width:900px) { .review-split { grid-template-columns:1fr; } .topbar-right { justify-items:start; } }

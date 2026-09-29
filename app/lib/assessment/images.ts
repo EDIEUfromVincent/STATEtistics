@@ -31,7 +31,8 @@ export const TEMPLATES: Template[] = [
   },
 ];
 
-const MAX_SIDE = 2000;
+// 1536px이면 A4 한 쪽이 Gemini 과금 조각 4개(768px×2×2)에 들어간다. 2000px이면 6개로 약 1.5배
+const MAX_SIDE = 1536;
 const A4_RATIO = 297 / 210;
 
 export type RawPage = { source: string; index: number; image: ImageBitmap | HTMLCanvasElement };
@@ -44,6 +45,8 @@ export type ProcessedPage = {
   url: string;
   sha256: string;
   warning: string;
+  width: number;
+  height: number;
 };
 
 const naturalKey = (name: string) => name.split(/(\d+)/).map(t => (/^\d+$/.test(t) ? t.padStart(8, "0") : t)).join("");
@@ -135,6 +138,7 @@ export async function processPage(raw: RawPage, code: string, page: number, temp
   const processed: ProcessedPage = {
     file: `${code}_p${page}.jpg`, code, page, source: raw.source, blob, url: URL.createObjectURL(blob),
     sha256: await sha256Hex(await blob.arrayBuffer()), warning: ratioWarning(canvas),
+    width: canvas.width, height: canvas.height,
   };
   return { processed, identityUrl };
 }

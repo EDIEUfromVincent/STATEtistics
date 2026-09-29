@@ -6,7 +6,8 @@ import { classStandards, distractors, itemStats, studentStandards } from "../app
 import { gradeItem, NEEDS_TEACHER } from "../app/lib/assessment/grade.ts";
 import { containsTerm, parseNumbers, parseOx, parseShortKey, parseSymbols } from "../app/lib/assessment/normalize.ts";
 import { createRoster, maskNames, parseRoster, rosterToCsv, sha256Hex } from "../app/lib/assessment/privacy.ts";
-import { buildRows, mergePages, reviewKey } from "../app/lib/assessment/records.ts";
+import { buildRows, READ_FAILED, reviewKey } from "../app/lib/assessment/records.ts";
+import { costKrw, estimateOcr, imageTokens } from "../app/lib/assessment/cost.ts";
 import { SAMPLE_KEY_CSV } from "../app/lib/assessment/sampleKey.ts";
 import { generateClass } from "../app/lib/assessment/synthetic.ts";
 
@@ -110,20 +111,53 @@ test("명부: 무작위 코드, 동명이인 거부, CSV 왕복", () => {
   assert.deepEqual(parseRoster(rosterToCsv(roster)), roster);
 });
 
-test("두 쪽에 걸친 문항 판독 합치기", () => {
-  const empty = { answer: "", confidence: 0.9, nameHits: 0 };
-  const three = { answer: "③", confidence: 0.9, nameHits: 0 };
-  const five = { answer: "⑤", confidence: 0.9, nameHits: 0 };
-  assert.equal(mergePages(empty, three).answer, "③");
-  assert.equal(mergePages(three, empty).answer, "③");
-  const merged = mergePages(three, five);
-  assert.equal(merged.confidence, 0);
-  assert.equal(merged.answer, "③ / ⑤");
+test("판독에 실패한 학생은 0점이 아니라 미확정으로 남는다", () => {
+  const items = loadAnswerKey(SAMPLE_KEY_CSV);
+  const readings = { K7M: { "1": { answer: "③", confidence: 0.99, nameHits: 0 } } };
+  const out = buildRows(items, readings, { assessmentId: "t", source: "t", codes: ["K7M", "X4Y"] });
+  const failed = out.rows.filter(r => r.학생코드 === "X4Y");
+  assert.equal(failed.length, items.length); // 결과에서 빠지지 않는다
+  assert.ok(failed.every(r => r.정오 === "" && r.점수 === "" && r.채점방식 === READ_FAILED));
+});
+
+test("빈칸으로 읽혔어도 확신이 낮으면 교사에게 묻는다", () => {
+  const items = loadAnswerKey(SAMPLE_KEY_CSV);
+  const readings = { K7M: { "1": { answer: "", confidence: 0.3, nameHits: 0 }, "2": { answer: "", confidence: 0.99, nameHits: 0 } } };
+  const out = buildRows(items, readings, { assessmentId: "t", source: "t" });
+  assert.deepEqual(out.readQueue.map(q => q.no).filter(n => n === "1" || n === "2"), ["1"]);
+  assert.ok(out.rows.find(r => r.문항 === "1")!.표시.includes("판독확인필요"));
+  assert.ok(out.rows.find(r => r.문항 === "2")!.표시.includes("무응답")); // 확실히 빈칸이면 무응답
+});
+
+test("모든 판독 대조하기를 켜면 서술형을 뺀 모든 답이 대조 목록에 오른다", () => {
+  const items = loadAnswerKey(SAMPLE_KEY_CSV);
+  const answers = Object.fromEntries(items.map(it => [it.no, { answer: "③", confidence: 0.99, nameHits: 0 }]));
+  const out = buildRows(items, { K7M: answers }, { assessmentId: "t", source: "t", reviewAll: true });
+  assert.equal(out.readQueue.length, items.filter(it => it.kind !== "서술").length);
+});
+
+test("정답표에 페이지 열이 없어도 된다", () => {
+  const key = "문항,유형,정답,배점,성취기준\n1,선택형,③,5,[6과14-01]\n2,OX,\"○,×\",5,[6과14-02]\n";
+  const items = loadAnswerKey(key);
+  assert.equal(items.length, 2);
+  assert.deepEqual(items[0].pages, []);
+});
+
+test("비용 추정: 1536px A4 한 쪽은 과금 조각 4개", () => {
+  assert.equal(imageTokens(1086, 1536), 4 * 258);
+  assert.equal(imageTokens(1414, 2000), 6 * 258); // 예전 2000px은 6개
+  assert.equal(imageTokens(300, 300), 258);
+  const est = estimateOcr(24, [[1086, 1536], [1086, 1536], [1086, 1536]], 20);
+  assert.equal(est.input, 24 * (3 * 1032 + 250 + 20 * 15));
+  // 생각 토큰은 출력 요금으로 계산한다
+  const price = { inputPerM: 0.3, outputPerM: 2.5, usdKrw: 1400 };
+  assert.ok(costKrw({ input: 0, output: 0, thoughts: 1_000_000 }, price) === costKrw({ input: 0, output: 1_000_000, thoughts: 0 }, price));
 });
 
 test("교사 확인이 채점에 반영된다", () => {
   const items = loadAnswerKey(SAMPLE_KEY_CSV);
-  const readings = { K7M: { "1": { answer: "?", confidence: 0.3, nameHits: 0 }, "6": { answer: "빛과 열이 난다", confidence: 0.9, nameHits: 0 } } };
+  const confident = Object.fromEntries(items.map(it => [it.no, { answer: "", confidence: 0.99, nameHits: 0 }]));
+  const readings = { K7M: { ...confident, "1": { answer: "?", confidence: 0.3, nameHits: 0 }, "6": { answer: "빛과 열이 난다", confidence: 0.9, nameHits: 0 } } };
   let out = buildRows(items, readings, { assessmentId: "t", source: "t" });
   assert.equal(out.readQueue.length, 1);
   assert.equal(out.essayQueue.length, 1);

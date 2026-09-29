@@ -16,17 +16,16 @@ export type ReadReview = { confirmed?: boolean; fixed?: string };
 export type EssayReview = { final?: number | null; aiScore?: number | null; aiEvidence?: string; aiUnstable?: boolean };
 export const reviewKey = (code: string, no: string) => `${code}|${no}`;
 
-/** 두 쪽에 걸친 문항: 한쪽만 답이 있으면 그것을, 둘 다 다르면 교사 확인으로 보낸다. */
-export function mergePages(old: Reading | undefined, next: Reading): Reading {
-  if (!old || !old.answer) return next.answer || !old ? next : old;
-  if (!next.answer || next.answer === old.answer) return old;
-  return { answer: `${old.answer} / ${next.answer}`, confidence: 0, nameHits: old.nameHits + next.nameHits };
-}
+export const READ_FAILED = "판독실패";
 
 export type BuildOptions = {
   assessmentId: string;
   source: string;
+  // 응시한 모든 학생. 판독 결과가 없는 학생은 빠뜨리지 않고 "판독실패"(미확정)로 남긴다
+  codes?: string[];
   lowConfidence?: number;
+  // 첫 사용 때 판독 정확도를 재기 위해 모든 판독을 교사 대조 목록에 올린다
+  reviewAll?: boolean;
   readReview?: Record<string, ReadReview>;
   essayReview?: Record<string, EssayReview>;
 };
@@ -46,14 +45,27 @@ export function buildRows(items: Item[], readings: Readings, options: BuildOptio
   const readQueue: BuildResult["readQueue"] = [];
   const essayQueue: BuildResult["essayQueue"] = [];
 
-  for (const code of Object.keys(readings).sort()) {
+  const codes = options.codes ?? Object.keys(readings);
+  for (const code of [...codes].sort()) {
+    const read = readings[code];
     for (const it of items) {
-      const reading = readings[code][it.no] ?? { answer: "", confidence: 0, nameHits: 0 };
+      if (!read) {
+        // 판독이 안 된 것을 무응답 0점으로 처리하면 점수가 틀린다
+        rows.push({
+          학생코드: code, 평가ID: options.assessmentId, 출처: options.source, 문항: it.no, 유형: it.kind,
+          응답: "", 정규화응답: "", 정오: "", 점수: "", 배점: String(it.points),
+          성취기준: it.standard, 행동영역: it.domain, 난이도: it.difficulty,
+          채점방식: READ_FAILED, 표시: READ_FAILED, 판독신뢰도: "",
+        });
+        continue;
+      }
+      const reading = read[it.no] ?? { answer: "", confidence: 0, nameHits: 0 };
       const key = reviewKey(code, it.no);
       const review = readReview[key] ?? {};
       let answer = reading.answer;
       const flags: string[] = [];
-      const uncertain = Boolean(answer) && reading.confidence < low && it.kind !== "서술";
+      // 빈칸으로 읽혔어도 확신이 낮으면 교사에게 묻는다 (흐린 글씨가 0점이 되지 않게)
+      const uncertain = it.kind !== "서술" && (options.reviewAll || reading.confidence < low);
       const fixed = review.fixed?.trim() ?? "";
       if (uncertain || fixed || review.confirmed) {
         readQueue.push({ code, no: it.no, answer: reading.answer, confidence: reading.confidence, reviewed: Boolean(fixed || review.confirmed) });

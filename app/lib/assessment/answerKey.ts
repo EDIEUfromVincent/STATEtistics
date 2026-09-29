@@ -6,12 +6,13 @@ import { nfc, parseNumbers, parseOx, parseShortKey, parseSymbols } from "./norma
 
 export const ITEM_KINDS = ["선택형", "복수선택", "기호", "OX", "단답", "서술"] as const;
 export type ItemKind = (typeof ITEM_KINDS)[number];
-const REQUIRED = ["문항", "페이지", "유형", "정답", "배점", "성취기준"];
+// 페이지 열은 없어도 된다. 판독은 학생 한 명의 모든 쪽을 한 번에 보고 문항을 찾는다.
+const REQUIRED = ["문항", "유형", "정답", "배점", "성취기준"];
 const STANDARD_RE = /^\[\d[가-힣]+\d{2}-\d{2}\]$/;
 
 export type Item = {
   no: string;
-  pages: number[]; // 답이 적힐 수 있는 쪽. 문항이 쪽을 넘어가면 여러 개
+  pages: number[]; // 참고용 (있으면 학생 1명 쪽수의 기본값을 정하는 데만 쓴다)
   kind: ItemKind;
   answer: string;
   points: number;
@@ -55,8 +56,8 @@ export function loadAnswerKey(text: string, name = "정답표"): Item[] {
     if (!STANDARD_RE.test(standard)) errors.push(`${where}: 성취기준 '${standard}' 형식이 아닙니다 (예: [6과14-02])`);
     const pages = nfc(r["페이지"]).split(/[,+\s]+/).filter(Boolean).map(Number);
     const points = Number(nfc(r["배점"]));
-    if (!pages.length || pages.some(p => !Number.isInteger(p) || p < 1) || !Number.isFinite(points)) {
-      errors.push(`${where}: 페이지(예: 2 또는 2,3)·배점은 숫자여야 합니다`);
+    if (pages.some(p => !Number.isInteger(p) || p < 1) || !Number.isFinite(points) || points <= 0) {
+      errors.push(`${where}: 배점은 0보다 큰 숫자, 페이지(선택)는 2 또는 2,3처럼 적어야 합니다`);
       return;
     }
     const answer = nfc(r["정답"]);
@@ -80,10 +81,6 @@ export function loadAnswerKey(text: string, name = "정답표"): Item[] {
 
 export function pageCount(items: Item[]) {
   return Math.max(0, ...items.flatMap(it => it.pages));
-}
-
-export function itemsOnPage(items: Item[], page: number) {
-  return items.filter(it => it.pages.includes(page));
 }
 
 /** OCR 요청용 문항 정보. 정답은 절대 넣지 않는다. */
