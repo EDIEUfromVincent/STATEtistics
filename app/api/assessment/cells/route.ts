@@ -1,4 +1,4 @@
-import { AssessmentApiError, assertAccess, audit, errorResponse, sha256 } from "../_gemini";
+import { AssessmentApiError, audit, errorResponse, sha256, teacherContext } from "../_gemini";
 import { readerConfig, readWithClaude, readWithGemini, readWithLocal, type CellInput } from "../_readers";
 
 const MAX_CELLS = 40;
@@ -7,10 +7,10 @@ const MAX_BASE64 = 2_000_000; // 조각 하나 약 1.5MB PNG
 // 학생 한 명의 "빈 양식 칸 | 학생 칸" 조각을 두 판독기(Claude, 로컬)에 동시에 맡긴다.
 export async function POST(request: Request) {
   try {
-    assertAccess(request);
-    const cfg = readerConfig();
-    if (cfg.provider === "claude" && !cfg.claudeReady) throw new AssessmentApiError("ANTHROPIC_API_KEY를 설정해 주세요.", 503);
-    if (cfg.provider === "gemini" && !cfg.geminiReady) throw new AssessmentApiError("GEMINI_API_KEY와 GEMINI_PAID_TIER=true를 설정해 주세요.", 503);
+    const { keys } = await teacherContext(request);
+    const cfg = readerConfig(keys);
+    if (cfg.provider === "claude" && !cfg.claudeReady) throw new AssessmentApiError("\"내 API 키\"에서 Gemini 또는 Anthropic API 키를 넣어 주세요.", 403);
+    if (cfg.provider === "gemini" && !cfg.geminiReady) throw new AssessmentApiError(keys.gemini ? "학생 자료는 Gemini 유료 등급 키로만 처리합니다. \"내 API 키\"에서 유료 등급이라고 표시해 주세요." : "\"내 API 키\"에서 Gemini API 키를 넣어 주세요.", 403);
     const body = (await request.json()) as { cells?: unknown; verify?: unknown };
     if (!Array.isArray(body.cells) || !body.cells.length || body.cells.length > MAX_CELLS) {
       throw new AssessmentApiError(`칸은 한 번에 1~${MAX_CELLS}개를 보내야 합니다.`, 400);
@@ -31,20 +31,20 @@ export async function POST(request: Request) {
 
     // 확인 판독: 주 판독이 정답으로 읽은 칸만 다른 계열 모델(Claude)로 다시 읽는다
     if (body.verify === true) {
-      if (!cfg.verifyModel || !cfg.claudeReady) throw new AssessmentApiError("확인 판독기(CELL_VERIFIER_MODEL, ANTHROPIC_API_KEY)가 설정되지 않았습니다.", 503);
-      const v = await readWithClaude(cells, cfg.verifyModel);
+      if (!cfg.verifyModel || !cfg.claudeReady) throw new AssessmentApiError("확인 판독에는 Anthropic API 키가 필요합니다.", 403);
+      const v = await readWithClaude(cells, keys, cfg.verifyModel);
       await audit("assessment_cells_verify", { cells: cells.length, reader: v.model, usage: v.usage });
       return Response.json({ cells: cells.map(c => ({ id: c.id, a: v.readings.get(c.id) ?? null })), reader: v.model, usage: v.usage, usd: v.usd });
     }
 
     const errors: string[] = [];
     const [a, b] = await Promise.allSettled([
-      cfg.provider === "gemini" ? readWithGemini(cells) : readWithClaude(cells),
+      cfg.provider === "gemini" ? readWithGemini(cells, keys) : readWithClaude(cells, keys),
       cfg.localUrl ? readWithLocal(cells) : Promise.resolve(null),
     ]);
     if (a.status === "rejected") {
       // 설정·인증 문제는 남은 학생도 모두 실패하므로 그대로 알린다
-      if (a.reason instanceof AssessmentApiError && a.reason.status === 503) throw a.reason;
+      if (a.reason instanceof AssessmentApiError && (a.reason.status === 503 || a.reason.status === 403)) throw a.reason;
       errors.push(`판독 A: ${a.reason instanceof Error ? a.reason.message : String(a.reason)}`);
     }
     if (b.status === "rejected") errors.push(`판독 B: ${b.reason instanceof Error ? b.reason.message : String(b.reason)}`);

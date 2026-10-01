@@ -56,7 +56,7 @@ export default function EssayStep() {
               </div>
               <div className="grading-actions">
                 <span className="helper-line">{queue.length}명 중 {left}명 남음</span>
-                {!g.demo && noSuggestion > 0 && <button className="secondary-action" disabled={!!g.essayBusy || !g.accessKey} onClick={() => g.suggestAllEssays(it)}>이 문항 AI 제안 모두 받기 ({noSuggestion}명)</button>}
+                {!g.demo && noSuggestion > 0 && <button className="secondary-action" disabled={!!g.essayBusy || !g.signedIn} onClick={() => g.suggestAllEssays(it)}>이 문항 AI 제안 모두 받기 ({noSuggestion}명)</button>}
               </div>
               {queue.length > 0 && <div className="table-scroll small-table"><table><thead><tr><th>학생</th><th>손글씨</th><th>옮겨 적은 글 (고칠 수 있음)</th><th>AI 제안</th><th>교사 점수</th></tr></thead><tbody>
                 {queue.map(q => {
@@ -72,7 +72,7 @@ export default function EssayStep() {
                     <td>{er.aiScore != null
                       ? <span className={er.aiUnstable ? "warn-note" : ""}>{er.aiScore}점{er.aiUnstable ? " (재확인 결과 다름)" : er.aiUnstable === false ? " (재확인 일치)" : ""}<small className="reading-pair">{er.aiEvidence ? `근거: “${er.aiEvidence}”` : ""}</small>
                         {er.aiUnstable == null && <button className="link-button" disabled={g.essayBusy === k} onClick={() => g.suggestEssay(q.code, q.item, q.answer, true).catch(() => {})}>재확인</button>}</span>
-                      : <button className="secondary-action" disabled={!!g.essayBusy || (!g.demo && !g.accessKey)} onClick={() => g.suggestEssay(q.code, q.item, q.answer).catch(() => {})}>{g.essayBusy === k ? "…" : "AI 제안"}</button>}</td>
+                      : <button className="secondary-action" disabled={!!g.essayBusy || (!g.demo && !g.signedIn)} onClick={() => g.suggestEssay(q.code, q.item, q.answer).catch(() => {})}>{g.essayBusy === k ? "…" : "AI 제안"}</button>}</td>
                     <td className="fix-cell">
                       <div className="fix-actions">
                         {scores.map(n => <button key={n} className={`chip ${er.final === n ? "on" : ""}`} onClick={() => setScore(k, n)}>{n}점</button>)}

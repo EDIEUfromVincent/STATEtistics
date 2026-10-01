@@ -44,10 +44,11 @@ export type ScanGroup = { group: number; crop: string; read: number | null; code
 export type CellInfo = { crop: string; a: string | null; b: string | null; note: string; where?: { page: number; box: [number, number, number, number] } };
 export type Progress = { done: number; total: number; errors: string[] };
 
-const ACCESS_KEY = "statetistic:accessKey";
+// 로그인한 선생님과 그 선생님이 넣은 API 키 상태(끝 네 자리). 판독 요금은 각자 키로 나간다
+export type Me = { teacher: { email: string; name: string } | null; keys?: { gemini: string; geminiPaid: boolean; anthropic: string }; loginReady: boolean } | null;
 
 type GradingState = {
-  accessKey: string; updateAccessKey: (v: string) => void; health: Health; pricing: Pricing;
+  me: Me; signedIn: boolean; refreshMe: () => Promise<void>; health: Health; pricing: Pricing;
   namesText: string; setNamesText: (v: string) => void; roster: Student[]; rosterError: string;
   className: string; setClassName: (v: string) => void; studentCount: string; setStudentCount: (v: string) => void;
   absentText: string; setAbsentText: (v: string) => void; label: (code: string) => string;
@@ -85,8 +86,7 @@ export function useGrading() {
 }
 
 export function GradingProvider({ children }: { children: ReactNode }) {
-  // 접속 코드는 탭을 닫으면 사라지게 둔다. 공용 PC에 남으면 다음 사람이 요금을 쓸 수 있다.
-  const [accessKey, setAccessKey] = useState(() => (typeof window === "undefined" ? "" : sessionStorage.getItem(ACCESS_KEY) ?? ""));
+  const [me, setMe] = useState<Me>(null);
   const [health, setHealth] = useState<Health>(null);
 
   // 이름 목록은 선택: 답에 쓴 이름을 가릴 때만 쓰고 화면·결과에는 내보내지 않는다
@@ -147,8 +147,10 @@ export function GradingProvider({ children }: { children: ReactNode }) {
   const ocrCache = useRef(new Map<string, Record<string, Reading>>());
 
   useEffect(() => {
-    localStorage.removeItem(ACCESS_KEY); // 예전 버전이 남긴 코드를 지운다
-    fetch("/api/assessment/health", { cache: "no-store" }).then(r => r.json()).then(setHealth).catch(() => setHealth({ ready: false, missing: ["서버 연결"], model: "" }));
+    // 예전 버전이 남긴 공유 접속 코드는 더 쓰지 않는다
+    localStorage.removeItem("statetistic:accessKey");
+    sessionStorage.removeItem("statetistic:accessKey");
+    void refreshMe();
     const held = urls.current;
     return () => held.forEach(u => URL.revokeObjectURL(u));
   }, []);
@@ -234,10 +236,16 @@ export function GradingProvider({ children }: { children: ReactNode }) {
     [items, readings, readCodes, assessmentId, source, readReview, essayReview, reviewAll, numbers],
   );
 
-  function updateAccessKey(value: string) {
-    setAccessKey(value);
-    sessionStorage.setItem(ACCESS_KEY, value);
+  /** 로그인 상태·키 상태·판독 준비 상태를 다시 읽는다 (로그인, 키 저장 뒤) */
+  async function refreshMe() {
+    const [m, h] = await Promise.all([
+      fetch("/api/auth/me", { cache: "no-store" }).then(r => r.json()).catch(() => ({ teacher: null, loginReady: false })),
+      fetch("/api/assessment/health", { cache: "no-store" }).then(r => r.json()).catch(() => ({ ready: false, missing: ["서버 연결"], model: "" })),
+    ]);
+    setMe(m);
+    setHealth(h);
   }
+
 
   /** 사진·판독·교사 확인을 지우기 전에 묻는다 */
   function confirmReset(reason: string) {
@@ -359,11 +367,11 @@ export function GradingProvider({ children }: { children: ReactNode }) {
       const found = formFromPdf(await readPdfPages(file), file.name.replace(/\.pdf$/i, ""));
       const ids = Object.keys(found.layout.cells);
       if (!ids.length) throw new Error("답 칸을 찾지 못했습니다. 한글·워드에서 만든 PDF인지 확인해 주세요 (종이를 스캔한 PDF는 글자 정보가 없어 칸을 찾을 수 없습니다).");
-      if (!accessKey) throw new Error("정답표 초안을 만들려면 위에 접속 코드를 넣어 주세요.");
+      if (!me?.teacher) throw new Error("정답표 초안을 만들려면 오른쪽 위에서 구글로 로그인하고 \"내 API 키\"에 Gemini 키를 넣어 주세요.");
       setDraftBusy(`답 칸 ${ids.length}개를 찾았습니다. 정답·해설 쪽으로 정답표 초안을 만드는 중…`);
       const response = await fetch("/api/assessment/draft-key", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-STATEtistic-Access-Key": accessKey },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           questionText: found.questionText, answerText: found.answerText,
           cells: ids.map(id => {
@@ -502,11 +510,11 @@ export function GradingProvider({ children }: { children: ReactNode }) {
       const have = opened.pages.length * layout.split;
       if (have % pps) throw new Error(`쪽 수가 맞지 않습니다: 스캔 ${opened.pages.length}장${layout.split === 2 ? " × 2쪽(모아 찍기)" : ""} = ${have}쪽은 학생 1명 ${pps}쪽으로 나누어떨어지지 않습니다. 스캔 방식과 학생 1명 쪽수를 확인하세요.`);
       const groupCount = have / pps;
-      // 빈 시험지와 접속 코드가 있으면 1쪽 머리글의 "반·번호"를 읽어 학생을 맞춘다 (스캔 순서와 상관없음)
+      // 빈 시험지가 있고 로그인했으면 1쪽 머리글의 "반·번호"를 읽어 학생을 맞춘다 (스캔 순서와 상관없음)
       const numberBox = blankPdf ? await headerNumberBox(blankPdf).catch(() => null) : null;
-      const byNumber = Boolean(numberBox && accessKey && !demo);
+      const byNumber = Boolean(numberBox && me?.teacher && !demo);
       if (!byNumber && groupCount !== students.length) {
-        throw new Error(`스캔은 ${groupCount}명분인데 응시 학생은 ${students.length}명입니다. 결시생을 학생 번호 단계에서 표시하거나, 시험지 단계에서 빈 시험지 PDF를 넣고 접속 코드를 넣으면 반·번호를 읽어 자동으로 맞춥니다.`);
+        throw new Error(`스캔은 ${groupCount}명분인데 응시 학생은 ${students.length}명입니다. 결시생을 학생 번호 단계에서 표시하거나, 시험지 단계에서 빈 시험지 PDF를 넣고 구글로 로그인하면 반·번호를 읽어 자동으로 맞춥니다.`);
       }
       if (byNumber && groupCount > roster.length) throw new Error(`스캔은 ${groupCount}명분인데 학생 수는 ${roster.length}명입니다. 학생 번호 단계의 학생 수를 확인하세요.`);
       // 한 장씩 읽고 → 돌리고·나누고 → 작은 JPEG로 잠시 모아 둔다 (원본 스캔은 바로 버린다).
@@ -548,7 +556,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
       if (byNumber) {
         const response = await fetch("/api/assessment/numbers", {
           method: "POST",
-          headers: { "Content-Type": "application/json", "X-STATEtistic-Access-Key": accessKey },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ crops: await Promise.all(crops.map(async (c, g) => ({ id: `G${g}`, image: c ? await blobToBase64(c.png) : "" }))) }),
         });
         const data = await response.json();
@@ -701,7 +709,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
         if (!got) {
           const response = await fetch("/api/assessment/ocr", {
             method: "POST",
-            headers: { "Content-Type": "application/json", "X-STATEtistic-Access-Key": accessKey },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ images: await Promise.all(studentPages.map(p => blobToBase64(p.blob))), items: specs }),
           });
           const payload = await response.json();
@@ -723,7 +731,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
         failed.push(s.code);
         const message = e instanceof Error ? e.message : String(e);
         errors.push(`${s.code}: ${message}`);
-        if (message.includes("접속 코드") || message.includes("설정해 주세요") || message.includes("GEMINI_API_KEY") || message.includes("GEMINI_MODEL")) {
+        if (message.includes("로그인") || message.includes("API 키") || message.includes("유료 등급") || message.includes("설정해 주세요") || message.includes("GEMINI_API_KEY") || message.includes("GEMINI_MODEL")) {
           // 설정 문제는 남은 학생도 모두 실패하므로 멈춘다
           failed.push(...todo.slice(i + 1).map(t => t.code));
           break;
@@ -839,7 +847,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
           }));
           const response = await fetch("/api/assessment/cells", {
             method: "POST",
-            headers: { "Content-Type": "application/json", "X-STATEtistic-Access-Key": accessKey },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ cells: payload }),
           });
           const data = await response.json();
@@ -889,7 +897,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
               }));
               const vr = await fetch("/api/assessment/cells", {
                 method: "POST",
-                headers: { "Content-Type": "application/json", "X-STATEtistic-Access-Key": accessKey },
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ cells: verifyCells, verify: true }),
               });
               const vd = await vr.json();
@@ -914,7 +922,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
         failed.push(s.code);
         const message = e instanceof Error ? e.message : String(e);
         errors.push(`${s.code}: ${message}`);
-        if (message.includes("접속 코드") || message.includes("설정해 주세요") || message.includes("ANTHROPIC_API_KEY") || message.includes("GEMINI_API_KEY")) {
+        if (message.includes("로그인") || message.includes("API 키") || message.includes("유료 등급") || message.includes("설정해 주세요") || message.includes("ANTHROPIC_API_KEY") || message.includes("GEMINI_API_KEY")) {
           failed.push(...todo.slice(i + 1).map(t => t.code));
           break;
         }
@@ -941,7 +949,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
       if (demo) throw new Error("데모에서는 AI 제안을 쓰지 않습니다. 확정점수를 직접 입력해 보세요.");
       const response = await fetch("/api/assessment/essay", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-STATEtistic-Access-Key": accessKey },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ no: it.no, points: it.points, rubric: it.rubric, answer }),
       });
       const payload = await response.json();
@@ -977,7 +985,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
   const resultCsv = () => toCsv([...LONG_COLUMNS], result?.rows ?? []);
 
   const value: GradingState = {
-    accessKey, updateAccessKey, health, pricing: health?.pricing ?? DEFAULT_PRICING,
+    me, signedIn: Boolean(me?.teacher), refreshMe, health, pricing: health?.pricing ?? DEFAULT_PRICING,
     namesText, setNamesText, roster, rosterError, makeRoster, loadRosterFile, toggleAbsent,
     className, setClassName, studentCount, setStudentCount, absentText, setAbsentText, label,
     keyName, items, keyError, applyKey, assessmentId, setAssessmentId, source, setSource,

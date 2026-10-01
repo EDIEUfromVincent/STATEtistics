@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
+import { usePathname } from "next/navigation";
+import { useGrading } from "../grading/GradingContext";
 import { clearCurrentDataset, parseDataset, useCurrentDatasetRaw } from "../lib/dataset";
 
-export type ActivePage = "generate" | "grading" | "analysis" | "studio";
+export type ActivePage = "generate" | "grading" | "analysis" | "studio" | "settings";
 
 // 만드는 단계와 쓰는 단계로 나눈다. 저장해 둔 CSV는 ② 분석 화면에서 바로 불러온다.
 const groups: Array<{ label: string; items: Array<{ id: ActivePage; href: string; label: string }> }> = [
@@ -47,7 +49,7 @@ export function AppHeader({ active, title, description }: { active: ActivePage; 
             );
           })}
         </nav>
-        <CurrentDatasetChip />
+        <div className="topbar-row"><CurrentDatasetChip /><AccountChip /></div>
       </div>
     </header>
   );
@@ -63,6 +65,28 @@ function CurrentDatasetChip() {
       <b title={dataset.name}>{dataset.name}</b>
       <small>{dataset.rows.length.toLocaleString()}행</small>
       <button onClick={() => { if (confirm("현재 데이터를 이 탭에서 지울까요?")) clearCurrentDataset(); }} aria-label="현재 데이터 지우기">×</button>
+    </div>
+  );
+}
+
+/** 구글 로그인 / 내 API 키 / 로그아웃 */
+function AccountChip() {
+  const g = useGrading();
+  const path = usePathname();
+  if (!g.me) return null;
+  if (!g.me.teacher) {
+    return g.me.loginReady ? <a className="account-chip login" href={`/api/auth/google?next=${encodeURIComponent(path)}`}>구글로 로그인</a> : null;
+  }
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    await g.refreshMe();
+  }
+  const needsKey = !g.me.keys?.gemini || !g.me.keys.geminiPaid;
+  return (
+    <div className="account-chip">
+      <span title={g.me.teacher.email}>{g.me.teacher.name || g.me.teacher.email}</span>
+      <Link className={needsKey ? "warn" : ""} href="/settings">{needsKey ? "API 키 넣기" : "내 API 키"}</Link>
+      <button onClick={logout}>로그아웃</button>
     </div>
   );
 }

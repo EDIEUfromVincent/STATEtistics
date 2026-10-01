@@ -1,32 +1,28 @@
+import { currentTeacher, teacherKeys } from "../../../lib/server/auth";
 import { geminiConfig } from "../_gemini";
 import { readerConfig } from "../_readers";
 
-// 설정 상태와 비용 추정에 쓸 요금만 알려 준다. 비용이 드는 Gemini 호출은 하지 않는다.
-export async function GET() {
-  const cfg = geminiConfig();
-  const missing = [
-    !cfg.accessKeySet && "STATETISTIC_ACCESS_KEY",
-    !cfg.apiKey && "GEMINI_API_KEY",
-    !cfg.paidTier && "GEMINI_PAID_TIER=true",
-  ].filter(Boolean);
-  // 양식 기반 칸 판독 (Claude + 로컬). 로컬 판독기가 없으면 모든 손글씨 칸이 교사 확인으로 간다
-  const rc = readerConfig();
+// 로그인한 선생님 기준의 판독 준비 상태와 비용 추정에 쓸 요금. 비용이 드는 호출은 하지 않는다.
+export async function GET(request: Request) {
+  const teacher = await currentTeacher(request).catch(() => null);
+  const keys = teacher ? await teacherKeys(teacher.id) : undefined;
+  const cfg = geminiConfig(keys);
+  const rc = readerConfig(keys);
   const readerReady = rc.provider === "gemini" ? rc.geminiReady : rc.claudeReady;
+  const login = teacher ? [] : ["구글 로그인"];
+  const geminiMissing = [!cfg.apiKey && "내 Gemini API 키", cfg.apiKey && !cfg.paidTier && "Gemini 유료 등급 표시"].filter(Boolean) as string[];
   const cells = {
-    ready: cfg.accessKeySet && readerReady,
-    missing: [!cfg.accessKeySet && "STATETISTIC_ACCESS_KEY", !readerReady && (rc.provider === "gemini" ? "GEMINI_API_KEY, GEMINI_PAID_TIER=true" : "ANTHROPIC_API_KEY")].filter(Boolean),
+    ready: Boolean(teacher) && readerReady,
+    missing: [...login, ...(teacher && !readerReady ? (rc.provider === "gemini" ? geminiMissing : ["내 Anthropic API 키"]) : [])],
     a: rc.provider === "gemini" ? rc.geminiModel : rc.claudeModel,
     b: rc.localUrl ? rc.localModel : null,
-    verify: rc.verifyModel && rc.claudeReady ? rc.verifyModel : null,
+    verify: rc.verifyModel || null,
   };
-  return Response.json(
-    {
-      cells,
-      ready: missing.length === 0,
-      missing,
-      model: cfg.model,
-      pricing: { inputPerM: cfg.priceInputPerM, outputPerM: cfg.priceOutputPerM, usdKrw: cfg.usdKrw },
-    },
-    { status: missing.length && !cells.ready ? 503 : 200 },
-  );
+  return Response.json({
+    cells,
+    ready: Boolean(teacher) && Boolean(cfg.apiKey) && cfg.paidTier,
+    missing: [...login, ...(teacher ? geminiMissing : [])],
+    model: cfg.model,
+    pricing: { inputPerM: cfg.priceInputPerM, outputPerM: cfg.priceOutputPerM, usdKrw: cfg.usdKrw },
+  });
 }

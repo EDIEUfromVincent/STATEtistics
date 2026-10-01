@@ -48,3 +48,6 @@ next-env.d.ts
 # 비밀값 (Anthropic 키 등) — 절대 올리지 않는다
 .env
 .env.*
+
+# 로컬 개발용 데이터베이스 (PGlite)
+/.data/

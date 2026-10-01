@@ -17,7 +17,7 @@ const MAX_BASE64 = 6_000_000; // 쪽당 약 4.5MB JPEG
 // 학생 한 명의 모든 쪽을 요청 한 번에 판독한다. 쪽마다 따로 보내면 같은 안내문이 쪽 수만큼 청구된다.
 export async function POST(request: Request) {
   try {
-    const cfg = assertReady(request);
+    const cfg = await assertReady(request);
     const body = (await request.json()) as { images?: unknown; items?: unknown };
     if (!Array.isArray(body.images) || !body.images.length || body.images.length > MAX_PAGES) {
       throw new AssessmentApiError(`학생 한 명당 1~${MAX_PAGES}쪽을 보내야 합니다.`, 400);

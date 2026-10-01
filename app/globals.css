@@ -359,3 +359,14 @@ details.advanced summary { cursor:pointer; color:#5b6474; font-size:13px; }
 
 .match-box { margin:14px 0; padding:12px; border:1px solid #dce1e9; border-radius:10px; background:#fbfcfe; }
 .number-crop { display:block; max-width:300px; height:auto; border:1px solid #dce1e9; border-radius:4px; background:#fff; }
+
+.account-notice { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin:10px 0; padding:10px 12px; border-radius:10px; font-size:14px; }
+.account-notice.warn { background:#fff8e1; border:1px solid #f3d27a; }
+.account-notice.ok { background:#eefaf3; border:1px solid #b9e4c9; }
+
+.topbar-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:flex-end; }
+.account-chip { display:inline-flex; align-items:center; gap:8px; padding:4px 10px; border:1px solid #dce1e9; border-radius:999px; background:#fff; font-size:13px; }
+.account-chip span { max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.account-chip a, .account-chip button { border:0; background:none; color:var(--blue); cursor:pointer; font-size:13px; padding:0; }
+.account-chip a.warn { color:#b45309; font-weight:600; }
+.account-chip.login { color:#fff; background:var(--blue); border-color:var(--blue); font-weight:600; text-decoration:none; }

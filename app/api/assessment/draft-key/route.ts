@@ -1,5 +1,5 @@
 import { STANDARDS } from "../../../lib/assessment/standards";
-import { AssessmentApiError, assertAccess, audit, callGemini, errorResponse, geminiConfig } from "../_gemini";
+import { AssessmentApiError, audit, callGemini, errorResponse, needGemini, teacherContext } from "../_gemini";
 
 // 빈 시험지 PDF에서 브라우저가 뽑은 "칸 목록 + 문제 글 + 정답·해설 글"로 정답표 초안을 만든다.
 // 학생 자료는 받지 않는다. 결과는 초안이며 교사가 확정해야 채점에 쓴다.
@@ -11,9 +11,9 @@ const codeOf = (s: string) => s.replace(/\s+/g, "");
 
 export async function POST(request: Request) {
   try {
-    assertAccess(request);
-    const cfg = geminiConfig();
-    if (!cfg.apiKey || !cfg.paidTier) throw new AssessmentApiError("GEMINI_API_KEY와 GEMINI_PAID_TIER=true를 설정해 주세요.", 503);
+    const { keys } = await teacherContext(request);
+    // 정답표 초안에는 학생 자료가 없지만, 같은 키 규칙(유료 등급)을 쓴다
+    const cfg = needGemini(keys);
     const body = (await request.json()) as { cells?: unknown; questionText?: unknown; answerText?: unknown };
     const cells = Array.isArray(body.cells) ? (body.cells as CellIn[]).filter(c => typeof c?.id === "string" && /^[\w-]{1,8}$/.test(c.id)).slice(0, 80) : [];
     const questionText = typeof body.questionText === "string" ? body.questionText.slice(0, 40000) : "";

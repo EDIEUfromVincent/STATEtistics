@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { AssessmentApiError, assertAccess, audit, callGemini, errorResponse, geminiConfig, sha256 } from "../_gemini";
+import type { TeacherKeys } from "../../../lib/server/auth";
+import { AssessmentApiError, audit, callGemini, errorResponse, needGemini, sha256, teacherContext } from "../_gemini";
 import { readerConfig } from "../_readers";
 
 // 학생 답안 1쪽 머리글에서 "반·번호" 부분만 잘라 낸 조각(이름은 잘라 냄)의 손글씨 숫자를 읽는다.
@@ -10,9 +11,8 @@ const MAX_BASE64 = 400_000;
 
 export async function POST(request: Request) {
   try {
-    assertAccess(request);
-    const cfg = geminiConfig();
-    if (!cfg.apiKey || !cfg.paidTier) throw new AssessmentApiError("GEMINI_API_KEY와 GEMINI_PAID_TIER=true를 설정해 주세요.", 503);
+    const { keys } = await teacherContext(request);
+    const cfg = needGemini(keys);
     const body = (await request.json()) as { crops?: unknown };
     if (!Array.isArray(body.crops) || !body.crops.length || body.crops.length > MAX) throw new AssessmentApiError(`조각은 1~${MAX}개를 보내야 합니다.`, 400);
     const crops = body.crops.map(v => {
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
     const { data, usage } = await callGemini({ ...cfg, model }, parts, schema);
     const rows = (Array.isArray(data.rows) ? data.rows : []) as Array<{ id: string; 반: number | null; 번호: number | null; 확실?: boolean }>;
     // 모델이 스스로 매긴 "확실"은 믿기 어렵다(3/7을 확실하다고 함) → 확인 판독기가 있으면 다른 계열로 한 번 더 읽어 다르면 애매로 표시
-    const second = await readNumbersWithClaude(crops).catch(() => null);
+    const second = await readNumbersWithClaude(crops, keys).catch(() => null);
     await audit("assessment_numbers", {
       crops: crops.length, model, usage,
       sha256: await Promise.all(crops.map(c => sha256(Uint8Array.from(atob(c.image), ch => ch.charCodeAt(0))))),
@@ -62,7 +62,7 @@ export async function POST(request: Request) {
         return { id: r.id, ban: Number.isInteger(r.반) ? r.반 : null, number, sure: r.확실 !== false && (second == null || other === number) };
       }),
       usd: usd + (second?.usd ?? 0),
-      checkedBy: second ? readerConfig().verifyModel : null,
+      checkedBy: second ? readerConfig(keys).verifyModel : null,
     });
   } catch (error) {
     return errorResponse(error);
@@ -70,10 +70,10 @@ export async function POST(request: Request) {
 }
 
 /** 확인 판독기(CELL_VERIFIER_MODEL, 예: claude-sonnet-5-5)로 번호만 다시 읽는다. 없으면 null */
-async function readNumbersWithClaude(crops: Array<{ id: string; image: string }>) {
-  const cfg = readerConfig();
+async function readNumbersWithClaude(crops: Array<{ id: string; image: string }>, keys: TeacherKeys) {
+  const cfg = readerConfig(keys);
   if (!cfg.verifyModel || !cfg.claudeReady) return null;
-  const client = new Anthropic();
+  const client = new Anthropic({ apiKey: keys.anthropic });
   const content: Anthropic.ContentBlockParam[] = [{ type: "text", text: "이미지마다 시험지 머리글의 \"○학년 ○반 ○번\" 부분입니다. 학생이 손으로 쓴 번호(반 다음 칸)의 숫자만 읽으세요. 비었거나 읽을 수 없으면 null." }];
   for (const c of crops) {
     content.push({ type: "text", text: `id ${c.id}` });

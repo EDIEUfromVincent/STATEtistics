@@ -1,4 +1,6 @@
-// 채점용 Gemini 중계. 서버가 받는 것은 이름 칸을 가린 페이지 이미지와 이름을 가린 서술형 텍스트뿐이다.
+import { AuthError, requireTeacher, teacherKeys, type TeacherKeys } from "../../lib/server/auth";
+
+// 채점용 Gemini 중계. 요청한 선생님(구글 로그인)의 API 키로 부른다. 서버가 받는 것은 이름 칸을 가린 페이지 이미지와 이름을 가린 서술형 텍스트뿐이다.
 // 이미지·텍스트는 저장하지 않고, 로그에는 해시와 크기만 남긴다.
 
 export class AssessmentApiError extends Error {
@@ -11,14 +13,13 @@ export class AssessmentApiError extends Error {
   }
 }
 
-export function geminiConfig() {
+export function geminiConfig(keys?: TeacherKeys) {
   return {
-    apiKey: process.env.GEMINI_API_KEY?.trim() ?? "",
+    apiKey: keys?.gemini ?? "",
     model: process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash",
-    // 무료 등급은 입력 데이터가 제품 개선에 쓰일 수 있어 학생 자료에 쓰지 않는다
-    paidTier: process.env.GEMINI_PAID_TIER?.trim().toLowerCase() === "true",
-    accessKeySet: Boolean(process.env.STATETISTIC_ACCESS_KEY?.trim()),
-    // 요금표 기준 추정용 (USD per 1M tokens). 실제 청구액은 Google Cloud 결제 화면이 기준이다
+    // 무료 등급은 입력 데이터가 제품 개선에 쓰일 수 있어 학생 자료에 쓰지 않는다 (선생님이 "유료 등급 키"라고 표시해야 쓴다)
+    paidTier: Boolean(keys?.geminiPaid),
+    // 요금표 기준 추정용 (USD per 1M tokens). 실제 청구액은 각 선생님의 Google Cloud 결제 화면이 기준이다
     priceInputPerM: Number(process.env.GEMINI_PRICE_INPUT_PER_M) || 0.3,
     priceOutputPerM: Number(process.env.GEMINI_PRICE_OUTPUT_PER_M) || 2.5,
     usdKrw: Number(process.env.USD_KRW) || 1400,
@@ -40,34 +41,31 @@ function thinkingConfig(model: string) {
   return undefined;
 }
 
-/** 학생 자료를 다루므로 접속 코드가 설정되지 않았으면 열어 두지 않는다 (fail closed). */
-export function assertReady(request: Request) {
-  assertAccess(request);
-  const cfg = geminiConfig();
-  if (!cfg.apiKey) throw new AssessmentApiError("Railway에 GEMINI_API_KEY를 설정해 주세요.", 503);
-  if (!cfg.paidTier) {
-    throw new AssessmentApiError("학생 자료는 Gemini 유료 등급에서만 처리합니다. 유료 등급 키라면 Railway에 GEMINI_PAID_TIER=true를 설정해 주세요.", 503);
-  }
+/** 로그인한 선생님과 그 선생님의 API 키. 로그인하지 않았으면 막는다 */
+export async function teacherContext(request: Request) {
+  const teacher = await requireTeacher(request);
+  rateLimit(`t${teacher.id}`);
+  return { teacher, keys: await teacherKeys(teacher.id) };
+}
+
+export function needGemini(keys: TeacherKeys) {
+  const cfg = geminiConfig(keys);
+  if (!cfg.apiKey) throw new AssessmentApiError("\"내 API 키\"에서 Gemini API 키를 넣어 주세요.", 403);
+  if (!cfg.paidTier) throw new AssessmentApiError("학생 자료는 Gemini 유료 등급 키로만 처리합니다. 유료 등급 키라면 \"내 API 키\"에서 유료 등급이라고 표시해 주세요.", 403);
   return cfg;
 }
 
-/** 접속 코드 확인 + 요청 수 제한. 접속 코드가 설정되지 않았으면 모든 요청을 막는다 */
-export function assertAccess(request: Request) {
-  if (!process.env.STATETISTIC_ACCESS_KEY?.trim()) throw new AssessmentApiError("Railway에 STATETISTIC_ACCESS_KEY(접속 코드)를 먼저 설정해 주세요.", 503);
-  const expected = process.env.STATETISTIC_ACCESS_KEY!.trim();
-  const provided = request.headers.get("x-statetistic-access-key")?.trim() ?? "";
-  let difference = provided.length ^ expected.length;
-  for (let i = 0; i < expected.length; i++) difference |= expected.charCodeAt(i) ^ (provided.charCodeAt(i) || 0);
-  if (difference !== 0) throw new AssessmentApiError("접속 코드가 올바르지 않습니다.", 401);
-  rateLimit(request);
+export async function assertReady(request: Request) {
+  const { keys } = await teacherContext(request);
+  return needGemini(keys);
 }
 
 const hits = new Map<string, number[]>();
 const WINDOW_MS = 10 * 60_000;
 const MAX_REQUESTS = 300; // 학생 1명당 판독 1번 + 서술형 여유 (여러 반을 연달아 채점해도 넉넉하게)
 
-function rateLimit(request: Request) {
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+function rateLimit(who: string) {
+  const ip = who;
   const now = Date.now();
   const recent = (hits.get(ip) ?? []).filter(t => now - t < WINDOW_MS);
   if (recent.length >= MAX_REQUESTS) throw new AssessmentApiError("요청이 너무 많습니다. 10분 뒤에 다시 시도해 주세요.", 429);
@@ -105,10 +103,10 @@ export async function callGemini(cfg: ReturnType<typeof geminiConfig>, parts: un
     const detail = await response.text().catch(() => "");
     // 잘못된 키는 400으로 온다
     if (response.status === 401 || response.status === 403 || /API_KEY_INVALID|API key not valid/i.test(detail)) {
-      throw new AssessmentApiError("GEMINI_API_KEY가 유효하지 않거나 권한이 없습니다. Railway 변수를 확인해 주세요.", 503);
+      throw new AssessmentApiError("Gemini API 키가 유효하지 않거나 권한이 없습니다. \"내 API 키\"에서 다시 넣어 주세요.", 403);
     }
     if (response.status === 429) throw new AssessmentApiError("Gemini 사용 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.", 429);
-    if (response.status === 404) throw new AssessmentApiError(`Gemini 모델 '${cfg.model}'을 찾을 수 없습니다. GEMINI_MODEL을 확인해 주세요.`, 503);
+    if (response.status === 404) throw new AssessmentApiError(`Gemini 모델 '${cfg.model}'을 찾을 수 없습니다.`, 502);
     throw new AssessmentApiError("Gemini 요청에 실패했습니다.", 502);
   }
   const payload = await response.json();
@@ -129,6 +127,7 @@ export async function callGemini(cfg: ReturnType<typeof geminiConfig>, parts: un
 }
 
 export function errorResponse(error: unknown) {
+  if (error instanceof AuthError) return Response.json({ error: error.message }, { status: error.status });
   const reason = error instanceof AssessmentApiError ? error : new AssessmentApiError("요청을 처리하지 못했습니다.");
   return Response.json({ error: reason.message }, { status: reason.status });
 }

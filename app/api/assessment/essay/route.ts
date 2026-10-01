@@ -4,7 +4,7 @@ import { AssessmentApiError, assertReady, audit, callGemini, errorResponse, GRAD
 // 브라우저가 한 번 더 요청해 앞의 점수와 비교한다. 점수 확정은 교사가 한다.
 export async function POST(request: Request) {
   try {
-    const cfg = assertReady(request);
+    const cfg = await assertReady(request);
     const body = (await request.json()) as { no?: unknown; points?: unknown; rubric?: unknown; answer?: unknown };
     const no = typeof body.no === "string" ? body.no.slice(0, 8) : "";
     const points = Number(body.points);

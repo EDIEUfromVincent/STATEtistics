@@ -3,6 +3,7 @@
 // 받는 것은 "빈 양식 칸 | 학생 칸" PNG 조각뿐이다. 쪽 전체·이름 칸·정답은 받지 않는다.
 
 import Anthropic from "@anthropic-ai/sdk";
+import type { TeacherKeys } from "../../lib/server/auth";
 import { AssessmentApiError, callGemini, geminiConfig } from "./_gemini";
 
 export type CellInput = { id: string; hint: string; blank: string; student: string };
@@ -15,20 +16,21 @@ const CLAUDE_PRICES: Record<string, [number, number]> = {
   "claude-haiku-4-5": [1, 5],
 };
 
-export function readerConfig() {
+/** 선생님 키에 맞춘 판독기 설정. 주 판독은 Gemini(있으면), 확인 판독은 Anthropic 키가 있을 때만 */
+export function readerConfig(keys?: TeacherKeys) {
   const claudeModel = process.env.CLAUDE_READER_MODEL?.trim() || "claude-opus-5-5";
-  const gemini = geminiConfig();
-  // 판독 A로 쓸 모델: claude(기본) 또는 gemini
-  const provider = process.env.CELL_READER?.trim().toLowerCase() === "gemini" ? "gemini" : "claude";
+  const gemini = geminiConfig(keys);
+  const forced = process.env.CELL_READER?.trim().toLowerCase();
+  const provider = forced === "claude" || (!gemini.apiKey && keys?.anthropic) ? "claude" : "gemini";
   return {
     provider,
     geminiReady: Boolean(gemini.apiKey) && gemini.paidTier,
-    geminiModel: process.env.GEMINI_READER_MODEL?.trim() || gemini.model,
-    claudeReady: Boolean(process.env.ANTHROPIC_API_KEY?.trim()),
+    geminiModel: process.env.GEMINI_READER_MODEL?.trim() || "gemini-3.8-flash",
+    claudeReady: Boolean(keys?.anthropic),
     claudeModel,
     claudePrice: CLAUDE_PRICES[claudeModel] ?? [4, 20],
-    // 확인 판독기: 주 판독이 "정답"으로 읽은 칸만 다른 계열 모델로 다시 읽는다 (비우면 확인하지 않음)
-    verifyModel: process.env.CELL_VERIFIER_MODEL?.trim() || "",
+    // 확인 판독기: 주 판독이 "정답"으로 읽은 칸만 다른 계열 모델로 다시 읽는다 (Anthropic 키가 있을 때)
+    verifyModel: keys?.anthropic ? process.env.CELL_VERIFIER_MODEL?.trim() || "claude-sonnet-5-5" : "",
     // 예: http://127.0.0.1:18114 (Mac에서 Spark Ollama로 열린 터널). Railway에서는 닿지 않으므로 비워 둔다
     localUrl: process.env.LOCAL_READER_URL?.trim().replace(/\/+$/, "") || "",
     localModel: process.env.LOCAL_READER_MODEL?.trim() || "gemma4:31b",
@@ -58,10 +60,10 @@ function parseOne(v: unknown): CellReading {
 }
 
 /** 판독 A: 학생 한 명의 칸을 요청 한 번에 (안내문을 칸마다 반복해서 내지 않는다) */
-export async function readWithClaude(cells: CellInput[], model?: string) {
-  const cfg = readerConfig();
+export async function readWithClaude(cells: CellInput[], keys: TeacherKeys, model?: string) {
+  const cfg = readerConfig(keys);
   const useModel = model ?? cfg.claudeModel;
-  const client = new Anthropic();
+  const client = new Anthropic({ apiKey: keys.anthropic });
   const content: Anthropic.Beta.BetaContentBlockParam[] = [
     { type: "text", text: `시험지의 답 칸 ${cells.length}개입니다. 칸마다 이미지 두 장이 이어집니다: 첫째는 아무것도 쓰지 않은 빈 양식, 둘째는 학생이 푼 시험지의 같은 칸입니다.\n${RULES}\n칸마다 id, added, answer, form_differs, multiple_marks를 적으세요.` },
   ];
@@ -92,7 +94,7 @@ export async function readWithClaude(cells: CellInput[], model?: string) {
       messages: [{ role: "user", content }],
     });
   } catch (error) {
-    if (error instanceof Anthropic.AuthenticationError) throw new AssessmentApiError("ANTHROPIC_API_KEY가 유효하지 않습니다.", 503);
+    if (error instanceof Anthropic.AuthenticationError) throw new AssessmentApiError("Anthropic API 키가 유효하지 않습니다. \"내 API 키\"에서 다시 넣어 주세요.", 403);
     if (error instanceof Anthropic.RateLimitError) throw new AssessmentApiError("Claude 사용 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.", 429);
     if (error instanceof Anthropic.APIError) throw new AssessmentApiError(`Claude 요청 실패 (${error.status})`, 502);
     throw error;
@@ -114,9 +116,9 @@ export async function readWithClaude(cells: CellInput[], model?: string) {
 }
 
 /** 판독 A (Gemini를 고른 경우): Claude와 같은 조각·같은 규칙으로 학생 한 명을 요청 한 번에 */
-export async function readWithGemini(cells: CellInput[]) {
-  const cfg = readerConfig();
-  const gemini = { ...geminiConfig(), model: cfg.geminiModel };
+export async function readWithGemini(cells: CellInput[], keys: TeacherKeys) {
+  const cfg = readerConfig(keys);
+  const gemini = { ...geminiConfig(keys), model: cfg.geminiModel };
   const parts: unknown[] = [
     { text: `시험지의 답 칸 ${cells.length}개입니다. 칸마다 이미지 두 장이 이어집니다: 첫째는 아무것도 쓰지 않은 빈 양식, 둘째는 학생이 푼 시험지의 같은 칸입니다.\n${RULES}\n칸마다 id, added, answer, form_differs, multiple_marks를 적으세요.` },
   ];
@@ -144,7 +146,7 @@ export async function readWithGemini(cells: CellInput[]) {
   try {
     result = await callGemini(gemini, parts, schema);
   } catch (error) {
-    if (error instanceof AssessmentApiError && error.status === 503) throw error;
+    if (error instanceof AssessmentApiError && (error.status === 503 || error.status === 403)) throw error;
     result = await callGemini(gemini, parts, schema);
   }
   const { data, usage } = result;
@@ -157,7 +159,7 @@ export async function readWithGemini(cells: CellInput[]) {
 
 /** 판독 B: 로컬 Ollama. 비전 모델 한 번에 이미지 두 장씩, 칸마다 차례로 (GPU 하나를 나눠 쓴다) */
 export async function readWithLocal(cells: CellInput[]) {
-  const cfg = readerConfig();
+  const cfg = readerConfig();  // 로컬 판독기는 선생님 키를 쓰지 않는다
   const out = new Map<string, CellReading>();
   for (const c of cells) {
     const prompt = `두 이미지는 시험지의 같은 칸입니다. 첫째는 아무것도 쓰지 않은 빈 양식, 둘째는 학생이 푼 시험지입니다.\n${RULES}${c.hint ? `\n답의 종류: ${c.hint}` : ""}\nJSON으로만 답하세요.`;

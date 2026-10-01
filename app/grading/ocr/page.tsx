@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo } from "react";
 import { costKrw, estimateOcr, formatKrw } from "../../lib/assessment/cost";
+import { AccountNotice } from "../AccountNotice";
 import { useGrading } from "../GradingContext";
 
 export default function OcrStep() {
@@ -24,9 +25,9 @@ export default function OcrStep() {
       <header><span>4</span><h3>판독</h3><p>{g.demo ? "데모: 서버로 보내지 않고 가상 판독 결과를 씁니다." : cells
           ? "양식 기반 판독: 빈칸과 고르는 칸은 이 브라우저에서 잉크로 판정하고, 손글씨·선택형 칸만 \"빈 양식 칸 | 학생 칸\" 조각으로 판독기에 보냅니다. 쪽 전체와 정답은 보내지 않습니다."
           : "학생 한 명의 가린 쪽을 한 번에 보내 학생이 쓴 답을 그대로 옮겨 적게 합니다. 정답은 보내지 않습니다. 이미 읽은 학생은 다시 보내지 않습니다."}</p></header>
+      <AccountNotice />
       {!g.approved && <p className="warn-note">아직 승인된 페이지가 없습니다. <Link href="/grading/photos">3단계</Link>에서 가림을 확인하고 승인하세요.</p>}
       {!g.demo && <div className="grading-row">
-        <label className="access-key-control">접속 코드<input type="password" autoComplete="off" value={g.accessKey} onChange={e => g.updateAccessKey(e.target.value)} placeholder="이 탭을 닫으면 지워집니다" /></label>
         <p className={ready ? "ok-note" : "warn-note"}>
           {g.health == null ? "확인 중…" : cells
             ? g.health.cells?.ready
@@ -36,7 +37,7 @@ export default function OcrStep() {
         </p>
       </div>}
       {g.approved && !cells && !g.demo && todo.length > 0 && <p className="helper-line">예상 비용: 학생 {todo.length}명 · 요청 {todo.length}번 · {formatKrw(costKrw(estimate, g.pricing))} (요금표 기준 추정)</p>}
-      <button className="run-model" disabled={!g.approved || running || todo.length === 0 || (!g.demo && !g.accessKey)} onClick={g.runOcr}>
+      <button className="run-model" disabled={!g.approved || running || todo.length === 0 || (!g.demo && !g.signedIn)} onClick={g.runOcr}>
         {running
           ? `판독 중… ${g.progress!.done}/${g.progress!.total}명`
           : todo.length === 0 && readCount > 0
