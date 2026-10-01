@@ -8,8 +8,8 @@ import { useGrading } from "./GradingContext";
 
 export const STEPS = [
   { href: "/grading", label: "학생 번호" },
-  { href: "/grading/key", label: "정답표" },
-  { href: "/grading/photos", label: "사진 · 가림 · 승인" },
+  { href: "/grading/key", label: "시험지" },
+  { href: "/grading/photos", label: "학생 답안" },
   { href: "/grading/ocr", label: "판독" },
   { href: "/grading/review", label: "판독 확인" },
   { href: "/grading/essay", label: "서술형 채점" },
@@ -19,7 +19,7 @@ export const STEPS = [
 export default function GradingLayout({ children }: { children: ReactNode }) {
   return (
     <main>
-      <AppHeader active="grading" title="시험지 채점" description="사진을 모은 뒤부터: 이름 칸 가림 → 교사 승인 → 판독 → 규칙 채점 → 분석 데이터" />
+      <AppHeader active="grading" title="시험지 채점" description="PDF 두 개로: 빈 시험지(정답 포함) → 학생 답안 스캔 → 판독·채점 → 교사 확인 → 결과·분석" />
       <div className="grading-page">
         <StepBar />
         {children}

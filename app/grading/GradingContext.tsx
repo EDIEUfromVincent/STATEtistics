@@ -12,6 +12,7 @@ import { blankLike, cellPair, cropByRegistration, FAINT, headerNumberBox, regist
 import { decide, SURE, UNSURE } from "../lib/assessment/decide";
 import { gradeItem } from "../lib/assessment/grade";
 import { FormError, parseForm, type FormLayout } from "../lib/assessment/form";
+import { formFromPdf, readPdfPages } from "../lib/assessment/pdfForm";
 import { applyLayout, blobToBase64, demoPage, LAYOUTS, openPages, processPage, processStaged, stagePage, TEMPLATES, type ProcessedPage } from "../lib/assessment/images";
 import { createRoster, maskNames, numberRoster, parseNumberList, parseRoster, present, sha256Hex, studentLabel, type Student } from "../lib/assessment/privacy";
 import { buildRows, LONG_COLUMNS, reviewKey, type BuildResult, type EssayReview, type Reading, type Readings, type ReadReview } from "../lib/assessment/records";
@@ -24,6 +25,11 @@ export type Health = {
   cells?: { ready: boolean; missing: string[]; a: string; b: string | null; verify?: string | null };
 } | null;
 // where: 이 칸이 학생 시험지(가린 쪽)의 어디에 있는지 — 쪽 번호와 쪽 크기에 대한 비율 [왼, 위, 오른, 아래]
+// 빈 시험지 PDF로 만든 정답표 초안. 교사가 표에서 고치고 확정해야 채점에 쓴다
+export type DraftRow = { 문항: string; 유형: string; 정답: string; 배점: number; 보기수?: number; 채점기준?: string; 행동영역?: string; 성취기준: string; 판독안내: string; 확신: string; 근거: string };
+export type Draft = { fileName: string; layout: FormLayout; rows: DraftRow[]; usd: number };
+export const DRAFT_COLUMNS = ["문항", "유형", "정답", "배점", "보기수", "채점기준", "행동영역", "난이도", "성취기준", "평가내용", "매핑상태", "판독안내"];
+
 export type CellInfo = { crop: string; a: string | null; b: string | null; note: string; where?: { page: number; box: [number, number, number, number] } };
 export type Progress = { done: number; total: number; errors: string[] };
 
@@ -54,6 +60,8 @@ type GradingState = {
   form: FormLayout | null; formName: string; blankPdf: File | null; formError: string;
   applyForm: (text: string, name: string) => boolean; setBlank: (f: File | null) => void; useCells: boolean;
   cellInfo: Record<string, CellInfo>; cellUsd: number;
+  draft: Draft | null; draftBusy: string; draftError: string; learnFromPdf: (f: File) => Promise<void>;
+  setDraftRows: (f: (rows: DraftRow[]) => DraftRow[]) => void; adoptDraft: () => boolean; discardDraft: () => void;
 };
 
 const Ctx = createContext<GradingState | null>(null);
@@ -112,6 +120,10 @@ export function GradingProvider({ children }: { children: ReactNode }) {
   const [cellInfo, setCellInfo] = useState<Record<string, CellInfo>>({});
   const [cellUsd, setCellUsd] = useState(0);
   const blankCache = useRef(new Map<string, Gray>());
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [draftBusy, setDraftBusy] = useState("");
+  const [draftError, setDraftError] = useState("");
+  const draftFile = useRef<File | null>(null);
   const urls = useRef<string[]>([]);
   // 같은 이미지·같은 문항이면 다시 돈 내지 않는다 (학생 쪽 해시 묶음 → 판독 결과)
   const ocrCache = useRef(new Map<string, Record<string, Reading>>());
@@ -263,6 +275,79 @@ export function GradingProvider({ children }: { children: ReactNode }) {
   }
 
   const useCells = Boolean(form && blankPdf);
+
+  /** 빈 시험지 PDF → 칸 위치(AI 없음) → 정답·해설 글로 정답표 초안(Gemini 한 번). 학생 자료는 쓰지 않는다 */
+  async function learnFromPdf(file: File) {
+    if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") { setDraftError("PDF 파일을 넣어 주세요."); return; }
+    setDraftError("");
+    setDraft(null);
+    draftFile.current = file;
+    try {
+      setDraftBusy("시험지에서 답 칸을 찾는 중…");
+      const found = formFromPdf(await readPdfPages(file), file.name.replace(/\.pdf$/i, ""));
+      const ids = Object.keys(found.layout.cells);
+      if (!ids.length) throw new Error("답 칸을 찾지 못했습니다. 한글·워드에서 만든 PDF인지 확인해 주세요 (종이를 스캔한 PDF는 글자 정보가 없어 칸을 찾을 수 없습니다).");
+      if (!accessKey) throw new Error("정답표 초안을 만들려면 위에 접속 코드를 넣어 주세요.");
+      setDraftBusy(`답 칸 ${ids.length}개를 찾았습니다. 정답·해설 쪽으로 정답표 초안을 만드는 중…`);
+      const response = await fetch("/api/assessment/draft-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-STATEtistic-Access-Key": accessKey },
+        body: JSON.stringify({
+          questionText: found.questionText, answerText: found.answerText,
+          cells: ids.map(id => {
+            const c = found.layout.cells[id];
+            return { id, kind: c.kind, line: found.lineOf[id] ?? "", options: c.kind === "pick" ? Object.keys(c.options ?? {}) : undefined, count: c.kind === "number" ? Object.keys(c.options ?? {}).length : undefined };
+          }),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "정답표 초안을 만들지 못했습니다.");
+      const got = new Map((data.rows as DraftRow[]).map(r => [r.문항, r]));
+      // 칸마다 한 줄. 모델이 빠뜨린 칸도 비워서 남긴다 (교사가 채운다)
+      const rows = ids.map(id => got.get(id) ?? { 문항: id, 유형: found.layout.cells[id].kind === "number" ? "선택형" : "단답", 정답: "", 배점: 1, 성취기준: "", 판독안내: found.lineOf[id] ?? "", 확신: "확인필요", 근거: "초안에 없음" });
+      setDraft({ fileName: file.name, layout: found.layout, rows, usd: Number(data.usd) || 0 });
+      if (!found.answerText) setDraftError("이 PDF에서 정답·해설 쪽을 찾지 못해 정답을 비워 두었습니다. 표에 정답을 적어 주세요.");
+    } catch (e) {
+      setDraftError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDraftBusy("");
+    }
+  }
+
+  const setDraftRows = (f: (rows: DraftRow[]) => DraftRow[]) => setDraft(d => (d ? { ...d, rows: f(d.rows) } : d));
+  const discardDraft = () => { setDraft(null); setDraftError(""); };
+
+  /** 교사가 확인한 초안을 정답표·칸 양식·빈 시험지로 한꺼번에 적용한다 */
+  function adoptDraft() {
+    if (!draft || !draftFile.current) return false;
+    const csv = toCsv(DRAFT_COLUMNS, draft.rows.map(r => ({
+      // "="로 함께 인정하는 표기는 단답만 받는다. 기호·OX·선택형은 표기 차이(③/3, (다)/다)를 채점 규칙이 이미 같게 본다
+      문항: r.문항, 유형: r.유형, 정답: r.유형 === "단답" ? r.정답 : r.정답.split("=")[0].trim(), 배점: r.배점, 보기수: r.유형 === "선택형" ? r.보기수 ?? Object.keys(draft.layout.cells[r.문항]?.options ?? {}).length : "",
+      채점기준: r.채점기준 ?? "", 행동영역: r.행동영역 ?? "", 난이도: "", 성취기준: r.성취기준, 평가내용: "", 매핑상태: r.확신 === "확인" ? "확인" : "확인필요", 판독안내: r.판독안내,
+    })));
+    try {
+      const loaded = loadAnswerKey(csv, draft.fileName);
+      const layout = parseForm(JSON.stringify(draft.layout), loaded.map(i => i.no));
+      if (!confirmReset("이 정답표로 확정합니다.")) return false;
+      setItems(loaded);
+      setKeyName(`${draft.fileName} (PDF에서 만듦)`);
+      setKeyError("");
+      setForm(layout);
+      setFormName(draft.fileName);
+      setFormError("");
+      blankCache.current.clear();
+      setBlankPdf(draftFile.current);
+      setPagesPerStudentState(layout.pages);
+      if (!assessmentId) setAssessmentId(draft.fileName.replace(/\.pdf$/i, ""));
+      resetPages();
+      setDraftError("");
+      setDraft(null); // 확정했으니 초안 표 대신 "채점 준비 완료"를 보여 준다
+      return true;
+    } catch (e) {
+      setDraftError(e instanceof Error ? e.message : String(e));
+      return false;
+    }
+  }
 
   function setTemplateId(v: string) {
     if (!confirmReset("이름 칸 양식을 바꿉니다.")) return;
@@ -732,6 +817,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
     reviewAll, setReviewAll, readReview, setReadReview, essayReview, setEssayReview,
     essayBusy, essayError, suggestEssay, suggestAllEssays, essayUsage, result, resultCsv,
     form, formName, blankPdf, formError, applyForm, setBlank, useCells, cellInfo, cellUsd,
+    draft, draftBusy, draftError, learnFromPdf, setDraftRows, adoptDraft, discardDraft,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

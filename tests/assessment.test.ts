@@ -353,3 +353,36 @@ test("결과는 번호 순서이고 학생별 점수표는 미확정 칸을 비�
   assert.equal(first["미확정"], "1");
   assert.equal(sheet.rows[1]["1번(1점)"], ""); // 판독 확인 대기
 });
+
+import { formFromPdf, isAnswerPage } from "../app/lib/assessment/pdfForm.ts";
+
+test("빈 시험지 PDF 글자에서 칸을 찾는다", () => {
+  const H = 842, W = 595;
+  const it = (str: string, x: number, y: number, w: number) => ({ str, x, y: H - y, w, h: 11 });
+  const page = { width: W, height: H, items: [
+    it("6. 빈칸을 채우세요.", 40, 100, 200),
+    it("길이는", 40, 120, 40), it("( __________ )", 84, 120, 70), it("지고, 기온은", 156, 120, 60), it("( __________ )", 220, 120, 70), it("진다.", 292, 120, 20),
+    it("시각보다", 40, 140, 50), it("(", 92, 140, 4), it("이르다", 98, 140, 30), it("/", 130, 140, 4), it("늦다", 136, 140, 20), it(")", 158, 140, 4),
+    it("7. 알맞은 것은?", 40, 180, 100),
+    it("① 가", 40, 200, 30), it("② 나", 90, 200, 30), it("③ 다", 140, 200, 30),
+    it("8. 까닭을 쓰세요.", 40, 240, 100),
+    it("______________________________", 40, 260, 400), it("______________________________", 40, 278, 400),
+    it("9. 맞으면 ○ 하세요.", 40, 290, 100),
+    it("(가) = 태양 고도", 40, 305, 80), it(" ", 124, 305, 30), it(")", 156, 305, 4), it("(", 120, 305, 4),
+  ] };
+  const answer = { width: W, height: H, items: [it("교사용 · 정답과 채점 포인트", 40, 60, 200), it("6 짧아 / 높아 / 늦다", 40, 80, 200)] };
+  const r = formFromPdf([page, answer]);
+  const c = r.layout.cells;
+  assert.deepEqual(Object.keys(c).sort(), ["6-1", "6-2", "6-3", "7", "8", "9"].sort());
+  assert.equal(c["9"].kind, "write"); // "(     )" 빈 괄호 (공백 항목은 폭만큼 펼친다)
+  assert.equal(c["6-1"].kind, "write");
+  assert.equal(c["6-3"].kind, "pick");
+  assert.deepEqual(Object.keys(c["6-3"].options!), ["이르다", "늦다"]);
+  assert.equal(c["7"].kind, "number");
+  assert.deepEqual(Object.keys(c["7"].options!), ["1", "2", "3"]);
+  assert.equal(c["8"].kind, "write"); // 이어진 밑줄 두 줄 = 서술 한 칸
+  assert.ok(c["8"].region[3] - c["8"].region[1] > 0.03);
+  assert.equal(r.layout.pages, 1); // 정답·해설 쪽은 칸을 찾지 않는다
+  assert.ok(isAnswerPage(r.answerText) && r.answerText.includes("짧아"));
+  assert.ok(c["6-1"].region[0] < c["6-2"].region[0]);
+});

@@ -341,3 +341,14 @@ tr.focused-row td { background:#eef4ff; }
 .rubric-box p { margin:6px 0 0; line-height:1.6; }
 .cell-input.wide { width:220px; }
 @media (max-width:900px) { .review-split { grid-template-columns:1fr; } .topbar-right { justify-items:start; } }
+
+.drop-zone { display:grid; justify-items:center; gap:6px; padding:28px 16px; border:2px dashed #b9c3d6; border-radius:12px; background:#f8faff; text-align:center; cursor:pointer; transition:background .15s, border-color .15s; }
+.drop-zone input[type=file] { display:none; }
+.drop-zone.over { border-color:#2563eb; background:#eaf1ff; }
+.drop-zone.disabled { cursor:default; opacity:.7; }
+.drop-zone b { font-size:16px; }
+.drop-zone span:not(.drop-icon) { font-size:13px; color:#5b6474; }
+.drop-icon { font-size:30px; }
+tr.warn-row td { background:#fff8e1; }
+details.advanced { margin-top:14px; }
+details.advanced summary { cursor:pointer; color:#5b6474; font-size:13px; }

@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { LAYOUTS, TEMPLATES } from "../../lib/assessment/images";
 import { studentLabel } from "../../lib/assessment/privacy";
+import { DropZone } from "../DropZone";
 import { useGrading } from "../GradingContext";
 
 export default function PhotosStep() {
@@ -12,18 +13,17 @@ export default function PhotosStep() {
 
   return (
     <section className="grading-card">
-      <header><span>3</span><h3>사진 넣기 · 가림 확인 · 승인</h3><p>스캔 앱으로 찍은 JPG/PNG/PDF를 번호 순서대로, 한 학생의 쪽을 연달아 선택하세요. 이름 칸은 이 브라우저에서 검게 가리고 촬영 정보(EXIF)는 지웁니다.</p></header>
-      {!ready && <p className="warn-note">먼저 <Link href="/grading">학생 번호</Link>와 <Link href="/grading/key">정답표</Link>를 준비하세요.</p>}
+      <header><span>3</span><h3>학생 답안 넣기 · 가림 확인 · 승인</h3><p>스캔 앱으로 찍은 JPG/PNG/PDF를 번호 순서대로, 한 학생의 쪽을 연달아 선택하세요. 이름 칸은 이 브라우저에서 검게 가리고 촬영 정보(EXIF)는 지웁니다.</p></header>
+      {!ready && <p className="warn-note">먼저 <Link href="/grading">학생 번호</Link>와 <Link href="/grading/key">시험지</Link>를 준비하세요.</p>}
       <div className="grading-row">
         <label>스캔 방식<select value={g.layoutId} onChange={e => g.setLayoutId(e.target.value)}>{LAYOUTS.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
         <label>이름 칸 양식<select value={g.templateId} onChange={e => g.setTemplateId(e.target.value)}>{TEMPLATES.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
         <label>학생 1명 쪽수<input type="number" min={1} max={8} value={g.pagesPerStudent} onChange={e => g.setPagesPerStudent(Number(e.target.value))} /></label>
       </div>
-      <label className="upload-drop">
-        <input type="file" multiple accept="image/jpeg,image/png,.pdf,.heic" disabled={!ready || g.processing} onChange={e => { g.handlePhotos(e.target.files); e.target.value = ""; }} />
-        <b>{g.processing ? `이름 칸 가리는 중… ${g.processed ? `${g.processed.done}/${g.processed.total}쪽` : ""}` : "사진·스캔 PDF 선택"}</b>
-        <span>{ready ? `응시 ${g.students.length}명 × ${g.pagesPerStudent}쪽 = ${g.students.length * g.pagesPerStudent}쪽이 필요합니다` : "학생 번호와 정답표를 먼저 준비하세요"}</span>
-      </label>
+      <DropZone accept="image/jpeg,image/png,.pdf,.heic" multiple disabled={!ready || g.processing} onFiles={files => g.handlePhotos(files)}
+        title={g.processing ? `이름 칸 가리는 중… ${g.processed ? `${g.processed.done}/${g.processed.total}쪽` : ""}` : ready ? "학생 답안 스캔 PDF(또는 사진)를 여기에 끌어다 놓거나 눌러서 고르세요" : "학생 번호와 시험지를 먼저 준비하세요"}>
+        {ready ? `응시 ${g.students.length}명 × ${g.pagesPerStudent}쪽 = ${g.students.length * g.pagesPerStudent}쪽이 필요합니다 · 이름 칸은 이 브라우저에서 검게 가립니다` : ""}
+      </DropZone>
       {g.pageError && <div className="model-error">{g.pageError}</div>}
       {g.pages.length > 0 && <>
         <ol className="helper-line">
