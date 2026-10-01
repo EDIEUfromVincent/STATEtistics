@@ -41,6 +41,9 @@ type SavedSetup = {
 
 export type ScanGroup = { group: number; crop: string; read: number | null; code: string; problem: string; auto: boolean };
 
+type CellRead = { answer: string; formDiffers: boolean; multipleMarks: boolean };
+/** 칸 판독 응답 (바로 판독·일괄 처리 공통) */
+type CellsData = { cells: Array<{ id: string; a: CellRead | null; b: CellRead | null }>; readers?: { a: string; b: string | null }; usd?: number; errors?: string[] };
 export type CellInfo = { crop: string; a: string | null; b: string | null; note: string; where?: { page: number; box: [number, number, number, number] } };
 export type Progress = { done: number; total: number; errors: string[] };
 
@@ -73,6 +76,7 @@ type GradingState = {
   form: FormLayout | null; formName: string; blankPdf: File | null; formError: string;
   applyForm: (text: string, name: string) => boolean; setBlank: (f: File | null) => void; useCells: boolean;
   cellInfo: Record<string, CellInfo>; cellUsd: number;
+  useBatch: boolean; setUseBatch: (v: boolean) => void; batchStatus: string;
   draft: Draft | null; draftBusy: string; draftError: string; learnFromPdf: (f: File) => Promise<void>;
   setDraftRows: (f: (rows: DraftRow[]) => DraftRow[]) => void; adoptDraft: () => boolean; discardDraft: () => void;
 };
@@ -137,6 +141,9 @@ export function GradingProvider({ children }: { children: ReactNode }) {
   const [formError, setFormError] = useState("");
   const [cellInfo, setCellInfo] = useState<Record<string, CellInfo>>({});
   const [cellUsd, setCellUsd] = useState(0);
+  // Gemini 일괄 처리(요금 절반, 느림)를 쓸지와 지금 상태
+  const [useBatch, setUseBatch] = useState(false);
+  const [batchStatus, setBatchStatus] = useState("");
   const blankCache = useRef(new Map<string, Gray>());
   const [draft, setDraft] = useState<Draft | null>(null);
   const [draftBusy, setDraftBusy] = useState("");
@@ -679,7 +686,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
   /** 학생 1명당 요청 1번. 이미 읽은 학생은 건너뛰고, 실패한 학생만 다시 보낸다. */
   async function runOcr() {
     if (!approvedHashes) return;
-    if (useCells && !demo) return runCells();
+    if (useCells && !demo) return runCells(useBatch);
     const specs = items.map(ocrSpec);
     const specKey = JSON.stringify(specs);
     if (demo) {
@@ -746,21 +753,73 @@ export function GradingProvider({ children }: { children: ReactNode }) {
   }
 
   /**
+   * Gemini 일괄 처리(요금 절반, 결과는 몇 분~최대 24시간 뒤). 한 번에 보낼 수 있는 크기(20MB)를 넘지 않게 학생을 나눠 맡기고,
+   * 30초마다 상태를 본다. 맡긴 일괄 처리는 선생님의 Gemini 프로젝트에만 있으므로 이 탭을 닫으면 결과를 받을 수 없다.
+   */
+  async function runBatch(list: Array<{ key: string; body: object }>): Promise<Map<string, CellsData>> {
+    const LIMIT = 12_000_000;
+    const chunks: Array<typeof list> = [];
+    let cur: typeof list = [], size = 0;
+    for (const x of list) {
+      const n = JSON.stringify(x.body).length;
+      if (cur.length && (size + n > LIMIT || cur.length >= 40)) { chunks.push(cur); cur = []; size = 0; }
+      cur.push(x); size += n;
+    }
+    if (cur.length) chunks.push(cur);
+    const names: string[] = [];
+    for (let i = 0; i < chunks.length; i++) {
+      setBatchStatus(`Gemini에 일괄 처리를 맡기는 중… (${i + 1}/${chunks.length})`);
+      const r = await fetch("/api/assessment/cells/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ students: chunks[i].map(x => ({ key: x.key, ...x.body })) }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "일괄 처리를 맡기지 못했습니다.");
+      names.push(d.name);
+    }
+    const out = new Map<string, CellsData>();
+    const started = Date.now();
+    const left = new Set(names);
+    while (left.size) {
+      for (const name of [...left]) {
+        const r = await fetch(`/api/assessment/cells/batch?name=${encodeURIComponent(name)}`);
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error ?? "일괄 처리 상태를 보지 못했습니다.");
+        if (d.state === "failed") throw new Error(`Gemini 일괄 처리가 끝나지 못했습니다 (${d.detail ?? "실패"}). 바로 판독으로 다시 해 주세요.`);
+        if (d.state !== "done") continue;
+        for (const st of d.students as Array<{ key: string; cells: CellsData["cells"]; usd: number; errors: string[] }>) {
+          out.set(st.key, { cells: st.cells, readers: d.readers, usd: st.usd, errors: st.errors });
+        }
+        left.delete(name);
+      }
+      if (!left.size) break;
+      const min = Math.floor((Date.now() - started) / 60000);
+      setBatchStatus(`Gemini 일괄 처리 대기 중 · ${min}분 지남 · ${names.length - left.size}/${names.length}묶음 끝남 · 이 탭을 닫지 마세요`);
+      await new Promise(r => setTimeout(r, 30_000));
+    }
+    return out;
+  }
+
+  /**
    * 양식 기반 칸 판독. 학생마다: 가린 쪽 위에 빈 양식을 겹친다 → 칸마다 더해진 잉크를 센다 →
    *  빈칸·확실히 고른 보기는 여기서 끝 (AI 없음) → 나머지 칸만 "빈 양식 칸 | 학생 칸" 조각으로 두 판독기에 보낸다
    *  → 두 판독이 같고 확실할 때만 자동 확정, 나머지는 교사 확인.
    */
-  async function runCells() {
+  async function runCells(batch = false) {
     if (!approvedHashes || !form || !blankPdf) return;
     const todo = students.filter(s => !readings[s.code]);
     const next: Readings = { ...readings };
     const info: Record<string, CellInfo> = { ...cellInfo };
     const failed: string[] = [];
     const errors: string[] = [];
-    let usd = 0;
+    let doneCount = 0;
+    let stop = false;
     setProgress({ done: 0, total: todo.length, errors: [] });
-    for (let i = 0; i < todo.length; i++) {
-      const s = todo[i];
+    setBatchStatus("");
+    // 학생 한 명: 조각 준비 → read(주 판독 요청) → 채점 규칙·확인 판독. read만 바로 판독/일괄 처리로 갈아 끼운다
+    const oneStudent = async (s: (typeof todo)[number], read: (body: object) => Promise<CellsData>) => {
+      let usd = 0;
       try {
         const studentPages = pagesByCode.get(s.code) ?? [];
         for (const p of studentPages) {
@@ -854,13 +913,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
                 sheets: await Promise.all((await packSheets(ask.map(q => ({ id: q.no, blank: q.blank, student: q.student })))).map(async sh => ({ ids: sh.ids, image: await blobToBase64(sh.png) }))),
               }
             : { cells: payload };
-          const response = await fetch("/api/assessment/cells", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          });
-          const data = await response.json();
-          if (!response.ok) throw new Error(data.error ?? "칸 판독에 실패했습니다.");
+          const data = await read(body);
           usd += Number(data.usd) || 0;
           if (data.errors?.length) errors.push(...(data.errors as string[]).map(e => `${s.code}: ${e}`));
           for (const c of data.cells as Array<{ id: string; a: { answer: string; formDiffers: boolean; multipleMarks: boolean } | null; b: { answer: string; formDiffers: boolean; multipleMarks: boolean } | null }>) {
@@ -931,16 +984,61 @@ export function GradingProvider({ children }: { children: ReactNode }) {
         failed.push(s.code);
         const message = e instanceof Error ? e.message : String(e);
         errors.push(`${s.code}: ${message}`);
-        if (message.includes("로그인") || message.includes("API 키") || message.includes("유료 등급") || message.includes("설정해 주세요") || message.includes("ANTHROPIC_API_KEY") || message.includes("GEMINI_API_KEY")) {
-          failed.push(...todo.slice(i + 1).map(t => t.code));
-          break;
-        }
+        // 설정·키 문제는 남은 학생도 모두 실패하므로 멈춘다
+        if (message.includes("로그인") || message.includes("API 키") || message.includes("유료 등급") || message.includes("설정해 주세요") || message.includes("ANTHROPIC_API_KEY") || message.includes("GEMINI_API_KEY")) stop = true;
       } finally {
-        setProgress({ done: i + 1, total: todo.length, errors: [...errors] });
+        doneCount++;
+        setProgress({ done: doneCount, total: todo.length, errors: [...errors] });
         const spent = usd;
         setCellUsd(v => v + spent);
-        usd = 0;
       }
+    };
+
+    const readNow = async (body: object): Promise<CellsData> => {
+      const response = await fetch("/api/assessment/cells", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "칸 판독에 실패했습니다.");
+      return data;
+    };
+    const geminiOnly = Boolean(health?.cells?.a?.startsWith("gemini") && !health?.cells?.b);
+    if (!batch || !geminiOnly) {
+      for (const s of todo) {
+        if (stop) { failed.push(s.code); continue; }
+        await oneStudent(s, readNow);
+      }
+    } else {
+      // 일괄 처리: 모든 학생의 조각을 먼저 만들어 두고, 묶음 그림을 한꺼번에 맡긴 뒤 결과가 오면 학생마다 마무리한다
+      type Waiting = { code: string; body: object; resolve: (d: CellsData) => void; reject: (e: unknown) => void; run: Promise<void> };
+      const waiting: Waiting[] = [];
+      setBatchStatus("학생 답안 조각을 만드는 중…");
+      for (const s of todo) {
+        if (stop) { failed.push(s.code); continue; }
+        const slot: Partial<Waiting> = { code: s.code };
+        let registered!: () => void;
+        const reg = new Promise<void>(r => (registered = r));
+        const run = oneStudent(s, body => new Promise<CellsData>((resolve, reject) => { Object.assign(slot, { body, resolve, reject }); registered(); }));
+        await Promise.race([reg, run]);
+        if (slot.body) waiting.push({ ...(slot as Waiting), run });
+      }
+      if (waiting.length) {
+        try {
+          const results = await runBatch(waiting.map(w => ({ key: w.code, body: w.body })));
+          setBatchStatus("결과를 채점하는 중…");
+          // 확인 판독(Claude)이 한꺼번에 몰리지 않게 학생 한 명씩 마무리한다
+          for (const w of waiting) {
+            const r = results.get(w.code);
+            if (r) w.resolve(r); else w.reject(new Error("일괄 처리 결과에 이 학생이 없습니다."));
+            await w.run;
+          }
+        } catch (e) {
+          for (const w of waiting) { w.reject(e); await w.run; }
+        }
+      }
+      setBatchStatus("");
     }
     setReadings(next);
     setCellInfo(info);
@@ -1003,7 +1101,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
     handlePhotos, approve, groups, assignGroup, demo, startDemo, readings, failedCodes, progress, runOcr, ocrUsage,
     reviewAll, setReviewAll, readReview, setReadReview, essayReview, setEssayReview,
     essayBusy, essayError, suggestEssay, suggestAllEssays, essayUsage, result, resultCsv,
-    form, formName, blankPdf, formError, applyForm, setBlank, useCells, cellInfo, cellUsd,
+    form, formName, blankPdf, formError, applyForm, setBlank, useCells, cellInfo, cellUsd, useBatch, setUseBatch, batchStatus,
     draft, draftBusy, draftError, learnFromPdf, setDraftRows, adoptDraft, discardDraft,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

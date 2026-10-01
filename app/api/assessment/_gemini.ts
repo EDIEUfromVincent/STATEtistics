@@ -88,35 +88,25 @@ export async function sha256(bytes: Uint8Array) {
 type Schema = Record<string, unknown>;
 export type Usage = { input: number; output: number; thoughts: number };
 
-export async function callGemini(cfg: ReturnType<typeof geminiConfig>, parts: unknown[], schema: Schema): Promise<{ data: Record<string, unknown>; usage: Usage }> {
+/** generateContent 요청 본문. 바로 판독과 일괄 처리(batch)가 같은 본문을 쓴다 */
+export function geminiBody(cfg: ReturnType<typeof geminiConfig>, parts: unknown[], schema: Schema) {
   const thinking = thinkingConfig(cfg.model);
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cfg.model)}:generateContent`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": cfg.apiKey },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts }],
-      generationConfig: {
-        temperature: 0, responseMimeType: "application/json", responseSchema: schema,
-        ...(thinking ? { thinkingConfig: thinking } : {}),
-      },
-    }),
-    signal: AbortSignal.timeout(120_000),
-  });
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    // 잘못된 키는 400으로 온다
-    if (response.status === 401 || response.status === 403 || /API_KEY_INVALID|API key not valid/i.test(detail)) {
-      throw new AssessmentApiError("Gemini API 키가 유효하지 않거나 권한이 없습니다. \"내 API 키\"에서 다시 넣어 주세요.", 403);
-    }
-    if (response.status === 429) throw new AssessmentApiError("Gemini 사용 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.", 429);
-    if (response.status === 404) throw new AssessmentApiError(`Gemini 모델 '${cfg.model}'을 찾을 수 없습니다.`, 502);
-    throw new AssessmentApiError("Gemini 요청에 실패했습니다.", 502);
-  }
-  const payload = await response.json();
-  const outParts = (payload?.candidates?.[0]?.content?.parts ?? []) as Array<{ text?: string; thought?: boolean }>;
-  const text = outParts.filter(p => !p.thought && typeof p.text === "string").map(p => p.text).join("");
+  return {
+    contents: [{ role: "user", parts }],
+    generationConfig: {
+      temperature: 0, responseMimeType: "application/json", responseSchema: schema,
+      ...(thinking ? { thinkingConfig: thinking } : {}),
+    },
+  };
+}
+
+/** generateContent 응답에서 JSON 답과 사용량을 꺼낸다 */
+export function parseGeminiPayload(payload: unknown): { data: Record<string, unknown>; usage: Usage } {
+  const p = payload as { candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }>; usageMetadata?: Record<string, unknown> };
+  const outParts = p?.candidates?.[0]?.content?.parts ?? [];
+  const text = outParts.filter(x => !x.thought && typeof x.text === "string").map(x => x.text).join("");
   if (!text) throw new AssessmentApiError("Gemini가 빈 응답을 반환했습니다.", 502);
-  const meta = payload?.usageMetadata ?? {};
+  const meta = p?.usageMetadata ?? {};
   const usage: Usage = {
     input: Number(meta.promptTokenCount) || 0,
     output: Number(meta.candidatesTokenCount) || 0,
@@ -127,6 +117,29 @@ export async function callGemini(cfg: ReturnType<typeof geminiConfig>, parts: un
   } catch {
     throw new AssessmentApiError("Gemini 응답을 해석하지 못했습니다.", 502);
   }
+}
+
+/** Gemini API 오류를 선생님이 알아들을 말로 바꾼다 */
+export async function geminiFailure(response: Response, model: string): Promise<never> {
+  const detail = await response.text().catch(() => "");
+  // 잘못된 키는 400으로 온다
+  if (response.status === 401 || response.status === 403 || /API_KEY_INVALID|API key not valid/i.test(detail)) {
+    throw new AssessmentApiError("Gemini API 키가 유효하지 않거나 권한이 없습니다. \"내 API 키\"에서 다시 넣어 주세요.", 403);
+  }
+  if (response.status === 429) throw new AssessmentApiError("Gemini 사용 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.", 429);
+  if (response.status === 404) throw new AssessmentApiError(`Gemini 모델 '${model}'을 찾을 수 없습니다.`, 502);
+  throw new AssessmentApiError("Gemini 요청에 실패했습니다.", 502);
+}
+
+export async function callGemini(cfg: ReturnType<typeof geminiConfig>, parts: unknown[], schema: Schema): Promise<{ data: Record<string, unknown>; usage: Usage }> {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cfg.model)}:generateContent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": cfg.apiKey },
+    body: JSON.stringify(geminiBody(cfg, parts, schema)),
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!response.ok) await geminiFailure(response, cfg.model);
+  return parseGeminiPayload(await response.json());
 }
 
 export function errorResponse(error: unknown) {

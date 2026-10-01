@@ -23,7 +23,7 @@ export default function OcrStep() {
   return (
     <section className="grading-card">
       <header><span>4</span><h3>판독</h3><p>{g.demo ? "데모: 서버로 보내지 않고 가상 판독 결과를 씁니다." : cells
-          ? "양식 기반 판독: 빈칸과 고르는 칸은 이 브라우저에서 잉크로 판정하고, 손글씨·선택형 칸만 \"빈 양식 칸 | 학생 칸\" 조각으로 판독기에 보냅니다. 쪽 전체와 정답은 보내지 않습니다."
+          ? "양식 기반 판독: 빈칸은 이 브라우저에서 잉크로 판정하고, 나머지 칸만 \"칸 이름 | 빈 양식 칸 | 학생 칸\" 줄을 모은 묶음 그림으로 판독기에 보냅니다. 쪽 전체와 정답은 보내지 않습니다."
           : "학생 한 명의 가린 쪽을 한 번에 보내 학생이 쓴 답을 그대로 옮겨 적게 합니다. 정답은 보내지 않습니다. 이미 읽은 학생은 다시 보내지 않습니다."}</p></header>
       <AccountNotice />
       {!g.approved && <p className="warn-note">아직 승인된 페이지가 없습니다. <Link href="/grading/photos">3단계</Link>에서 가림을 확인하고 승인하세요.</p>}
@@ -37,6 +37,10 @@ export default function OcrStep() {
         </p>
       </div>}
       {g.approved && !cells && !g.demo && todo.length > 0 && <p className="helper-line">예상 비용: 학생 {todo.length}명 · 요청 {todo.length}번 · {formatKrw(costKrw(estimate, g.pricing))} (요금표 기준 추정)</p>}
+      {cells && g.health?.cells?.a?.startsWith("gemini") && !g.health?.cells?.b && <label className="approve-check">
+        <input type="checkbox" checked={g.useBatch} disabled={running} onChange={e => g.setUseBatch(e.target.checked)} />
+        Gemini 일괄 처리로 판독 (Gemini 요금 절반 · 결과까지 보통 몇 분, 길게는 24시간 · 끝날 때까지 이 탭을 열어 두세요)
+      </label>}
       <button className="run-model" disabled={!g.approved || running || todo.length === 0 || (!g.demo && !g.signedIn)} onClick={g.runOcr}>
         {running
           ? `판독 중… ${g.progress!.done}/${g.progress!.total}명`
@@ -46,6 +50,7 @@ export default function OcrStep() {
               ? `실패한 학생만 다시 판독 (${todo.length}명)`
               : `판독 시작 (학생 ${todo.length}명)`}<b>→</b>
       </button>
+      {g.batchStatus && <p className="warn-note">{g.batchStatus}</p>}
       {g.failedCodes.length > 0 && !running && <div className="model-error">
         <b>판독하지 못한 학생 {g.failedCodes.length}명</b> — 이 학생들은 0점이 아니라 &quot;판독실패(미확정)&quot;로 남습니다. 위 버튼으로 이 학생들만 다시 보낼 수 있습니다.
         {g.progress?.errors.slice(0, 5).map(e => <div key={e}>{e}</div>)}

@@ -162,8 +162,36 @@ export type SheetInput = { ids: string[]; image: string };
  * 판독 A (Gemini, 묶음): 학생 한 명의 칸을 몇 장의 묶음 그림으로 받는다. 한 줄 = [칸 이름 | 빈 양식 | 학생 답].
  * Gemini는 그림 크기와 상관없이 장당 토큰을 매기므로 칸마다 두 장씩 보낼 때보다 요금이 크게 준다.
  */
-export async function readSheetsWithGemini(sheets: SheetInput[], hints: Map<string, string>, keys: TeacherKeys) {
-  const gemini = geminiConfig(keys);
+const MAX_SHEET_BASE64 = 2_000_000;
+export const MAX_SHEET_CELLS = 40;
+export const MAX_SHEETS = 15;
+
+/** 브라우저가 보낸 묶음 그림과 칸 안내를 검사한다 (바로 판독·일괄 처리 공통) */
+export function parseSheetBody(body: { cells?: unknown; sheets?: unknown }) {
+  if (!Array.isArray(body.sheets) || !body.sheets.length || body.sheets.length > MAX_SHEETS) throw new AssessmentApiError(`묶음 그림은 1~${MAX_SHEETS}장을 보내야 합니다.`, 400);
+  const seen = new Set<string>();
+  const sheets: SheetInput[] = body.sheets.map(v => {
+    const s = v as Partial<SheetInput>;
+    // 브라우저가 만든 JPEG(/9j/) 또는 PNG(iVBORw0KGgo)만 받는다
+    if (typeof s.image !== "string" || !s.image || s.image.length > MAX_SHEET_BASE64 || !(s.image.startsWith("/9j/") || s.image.startsWith("iVBORw0KGgo")) || !Array.isArray(s.ids) || !s.ids.length) {
+      throw new AssessmentApiError("브라우저에서 만든 묶음 그림만 받습니다.", 400);
+    }
+    for (const id of s.ids) {
+      if (typeof id !== "string" || !/^[\w-]{1,8}$/.test(id) || seen.has(id)) throw new AssessmentApiError("칸 번호가 올바르지 않습니다.", 400);
+      seen.add(id);
+    }
+    return { ids: s.ids as string[], image: s.image };
+  });
+  if (seen.size > MAX_SHEET_CELLS) throw new AssessmentApiError(`칸은 한 번에 ${MAX_SHEET_CELLS}개까지 보낼 수 있습니다.`, 400);
+  const hints = new Map<string, string>();
+  for (const v of Array.isArray(body.cells) ? body.cells : []) {
+    const c = v as { id?: unknown; hint?: unknown };
+    if (typeof c.id === "string" && seen.has(c.id) && typeof c.hint === "string") hints.set(c.id, c.hint.replace(/[\r\n]+/g, " ").slice(0, 80));
+  }
+  return { sheets, hints, ids: [...seen] };
+}
+
+export function sheetRequest(sheets: SheetInput[], hints: Map<string, string>) {
   const ids = sheets.flatMap(s => s.ids);
   const parts: unknown[] = [
     { text: `시험지의 답 칸 ${ids.length}개를 그림 ${sheets.length}장에 모았습니다. 그림마다 칸이 한 줄씩 있고 줄은 굵은 가로선으로 나뉩니다.
@@ -176,7 +204,7 @@ ${ids.map(id => `칸 ${id}${hints.get(id) ? ` (답의 종류: ${hints.get(id)})`
   sheets.forEach((s, i) => {
     parts.push({ text: `그림 ${i + 1}: 칸 ${s.ids.join(", ")}` });
     // 묶음 그림은 칸이 여러 개라 기본 해상도(장당 약 1,090토큰)로는 작은 체크 표시가 뭉개진다 → 아주 높은 해상도(장당 약 2,210토큰)
-    parts.push({ inlineData: { mimeType: "image/png", data: s.image }, mediaResolution: { level: "MEDIA_RESOLUTION_ULTRA_HIGH" } });
+    parts.push({ inlineData: { mimeType: s.image.startsWith("/9j/") ? "image/jpeg" : "image/png", data: s.image }, mediaResolution: { level: "MEDIA_RESOLUTION_ULTRA_HIGH" } });
   });
   const schema = {
     type: "OBJECT",
@@ -192,6 +220,22 @@ ${ids.map(id => `칸 ${id}${hints.get(id) ? ` (답의 종류: ${hints.get(id)})`
     },
     required: ["cells"],
   };
+  return { ids, parts, schema };
+}
+
+export function readingsOf(data: Record<string, unknown>) {
+  const out = new Map<string, CellReading>();
+  for (const r of (Array.isArray(data.cells) ? data.cells : []) as Array<Record<string, unknown>>) if (typeof r.id === "string") out.set(r.id, parseOne(r));
+  return out;
+}
+
+/**
+ * 판독 A (Gemini, 묶음): 학생 한 명의 칸을 몇 장의 묶음 그림으로 받는다. 한 줄 = [칸 이름 | 빈 양식 | 학생 답].
+ * Gemini는 그림 크기와 상관없이 장당 토큰을 매기므로 칸마다 두 장씩 보낼 때보다 요금이 크게 준다.
+ */
+export async function readSheetsWithGemini(sheets: SheetInput[], hints: Map<string, string>, keys: TeacherKeys) {
+  const gemini = geminiConfig(keys);
+  const { parts, schema } = sheetRequest(sheets, hints);
   let result;
   try {
     result = await callGemini(gemini, parts, schema);
@@ -200,10 +244,8 @@ ${ids.map(id => `칸 ${id}${hints.get(id) ? ` (답의 종류: ${hints.get(id)})`
     result = await callGemini(gemini, parts, schema);
   }
   const { data, usage } = result;
-  const out = new Map<string, CellReading>();
-  for (const r of (Array.isArray(data.cells) ? data.cells : []) as Array<Record<string, unknown>>) if (typeof r.id === "string") out.set(r.id, parseOne(r));
   const usd = (usage.input * gemini.priceInputPerM + (usage.output + usage.thoughts) * gemini.priceOutputPerM) / 1e6;
-  return { readings: out, model: gemini.model, usage: { input: usage.input, output: usage.output + usage.thoughts }, usd };
+  return { readings: readingsOf(data), model: gemini.model, usage: { input: usage.input, output: usage.output + usage.thoughts }, usd };
 }
 
 /** 판독 B: 로컬 Ollama. 비전 모델 한 번에 이미지 두 장씩, 칸마다 차례로 (GPU 하나를 나눠 쓴다) */

@@ -513,6 +513,7 @@ export function cropByRegistration(scan: Gray, reg: Registration, box: Box): Gra
  * 판독 요금을 줄이려고 학생 한 명의 칸 여러 개를 한 장에 모은다.
  * Gemini는 이미지 크기와 상관없이 장당 약 1,060토큰을 매겨서, 작은 조각을 칸마다 두 장씩 보내면 학생 한 명에 약 5만 7천 토큰이 들었다.
  * 한 줄 = [칸 이름 | 빈 양식 | 학생 답]. 줄 사이는 굵은 선으로 나눈다.
+ * PNG로 저장한다. JPEG(품질 90)로 줄여 보낸 시험에서 보기 위 체크를 다른 번호로 읽은 칸이 있었다.
  */
 export const SHEET_W = 1400;
 const SHEET_MAX_H = 1400;
