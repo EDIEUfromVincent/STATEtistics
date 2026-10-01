@@ -356,3 +356,6 @@ details.advanced summary { cursor:pointer; color:#5b6474; font-size:13px; }
 .page-tools { display:flex; justify-content:flex-end; gap:8px; grid-column:1 / -1; }
 .csv-load { display:inline-flex; flex-direction:column; gap:4px; }
 .csv-load input[type=file] { display:none; }
+
+.match-box { margin:14px 0; padding:12px; border:1px solid #dce1e9; border-radius:10px; background:#fbfcfe; }
+.number-crop { display:block; max-width:300px; height:auto; border:1px solid #dce1e9; border-radius:4px; background:#fff; }

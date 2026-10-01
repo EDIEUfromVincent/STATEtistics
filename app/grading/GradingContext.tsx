@@ -14,7 +14,7 @@ import { gradeItem } from "../lib/assessment/grade";
 import { FormError, parseForm, type FormLayout } from "../lib/assessment/form";
 import { formFromPdf, readPdfPages } from "../lib/assessment/pdfForm";
 import { applyLayout, blobToBase64, demoPage, LAYOUTS, openPages, processPage, processStaged, stagePage, TEMPLATES, type ProcessedPage } from "../lib/assessment/images";
-import { createRoster, maskNames, numberRoster, parseNumberList, parseRoster, present, sha256Hex, studentLabel, type Student } from "../lib/assessment/privacy";
+import { createRoster, maskNames, matchGroups, numberRoster, parseNumberList, parseRoster, present, sha256Hex, studentLabel, type Student } from "../lib/assessment/privacy";
 import { buildRows, LONG_COLUMNS, reviewKey, type BuildResult, type EssayReview, type Reading, type Readings, type ReadReview } from "../lib/assessment/records";
 import { SAMPLE_KEY_CSV, SAMPLE_KEY_NAME } from "../lib/assessment/sampleKey";
 import { demoNames, syntheticReadings } from "../lib/assessment/synthetic";
@@ -29,6 +29,8 @@ export type Health = {
 export type DraftRow = { 문항: string; 유형: string; 정답: string; 배점: number; 보기수?: number; 채점기준?: string; 행동영역?: string; 성취기준: string; 판독안내: string; 확신: string; 근거: string };
 export type Draft = { fileName: string; layout: FormLayout; rows: DraftRow[]; usd: number };
 export const DRAFT_COLUMNS = ["문항", "유형", "정답", "배점", "보기수", "채점기준", "행동영역", "난이도", "성취기준", "평가내용", "매핑상태", "판독안내"];
+
+export type ScanGroup = { group: number; crop: string; read: number | null; code: string; problem: string; auto: boolean };
 
 export type CellInfo = { crop: string; a: string | null; b: string | null; note: string; where?: { page: number; box: [number, number, number, number] } };
 export type Progress = { done: number; total: number; errors: string[] };
@@ -49,6 +51,7 @@ type GradingState = {
   pages: ProcessedPage[]; pagesByCode: Map<string, ProcessedPage[]>; identity: Record<string, string>; pageError: string; processing: boolean;
   checked: boolean; setChecked: (v: boolean) => void; approved: boolean;
   handlePhotos: (files: FileList | null) => Promise<void>; approve: () => void;
+  groups: ScanGroup[]; assignGroup: (group: number, code: string) => void;
   demo: boolean; startDemo: () => Promise<boolean>;
   readings: Readings; failedCodes: string[]; progress: Progress | null; runOcr: () => Promise<void>; ocrUsage: Usage;
   reviewAll: boolean; setReviewAll: (v: boolean) => void;
@@ -96,6 +99,8 @@ export function GradingProvider({ children }: { children: ReactNode }) {
   const [processed, setProcessed] = useState<{ done: number; total: number } | null>(null);
 
   const [pages, setPages] = useState<ProcessedPage[]>([]);
+  // 스캔 묶음(학생 한 명분)마다: 반·번호 조각, 읽은 번호, 맞춘 학생 코드(못 맞추면 "미정n"), 확인할 점
+  const [groups, setGroups] = useState<ScanGroup[]>([]);
   const [identity, setIdentity] = useState<Record<string, string>>({});
   const [pageError, setPageError] = useState("");
   const [processing, setProcessing] = useState(false);
@@ -179,6 +184,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
     urls.current = [];
     setPages([]);
     setIdentity({});
+    setGroups([]);
     setApprovedHashes(null);
     setChecked(false);
     setReadings({});
@@ -379,70 +385,115 @@ export function GradingProvider({ children }: { children: ReactNode }) {
     try {
       const opened = await openPages([...files], layout.split);
       close = opened.close;
-      const need = students.length * pagesPerStudent;
       const have = opened.pages.length * layout.split;
-      if (have !== need) {
-        throw new Error(`쪽 수가 맞지 않습니다: 스캔 ${opened.pages.length}장${layout.split === 2 ? " × 2쪽(모아 찍기)" : ""} = ${have}쪽, 응시 학생 ${students.length}명 × ${pagesPerStudent}쪽 = ${need}쪽. 결시생은 학생 번호 단계에서 결시로 표시하고, 스캔 방식과 학생 1명 쪽수를 확인하세요.`);
+      if (have % pagesPerStudent) throw new Error(`쪽 수가 맞지 않습니다: 스캔 ${opened.pages.length}장${layout.split === 2 ? " × 2쪽(모아 찍기)" : ""} = ${have}쪽은 학생 1명 ${pagesPerStudent}쪽으로 나누어떨어지지 않습니다. 스캔 방식과 학생 1명 쪽수를 확인하세요.`);
+      const groupCount = have / pagesPerStudent;
+      // 빈 시험지와 접속 코드가 있으면 1쪽 머리글의 "반·번호"를 읽어 학생을 맞춘다 (스캔 순서와 상관없음)
+      const numberBox = blankPdf ? await headerNumberBox(blankPdf).catch(() => null) : null;
+      const byNumber = Boolean(numberBox && accessKey && !demo);
+      if (!byNumber && groupCount !== students.length) {
+        throw new Error(`스캔은 ${groupCount}명분인데 응시 학생은 ${students.length}명입니다. 결시생을 학생 번호 단계에서 표시하거나, 시험지 단계에서 빈 시험지 PDF를 넣고 접속 코드를 넣으면 반·번호를 읽어 자동으로 맞춥니다.`);
       }
+      if (byNumber && groupCount > roster.length) throw new Error(`스캔은 ${groupCount}명분인데 학생 수는 ${roster.length}명입니다. 학생 번호 단계의 학생 수를 확인하세요.`);
       // 한 장씩 읽고 → 돌리고·나누고 → 작은 JPEG로 잠시 모아 둔다 (원본 스캔은 바로 버린다).
-      // 같은 쪽 번호끼리 반 전체의 인쇄 위치를 비교해야 쪽마다 밀린 만큼 가림 띠를 늘릴 수 있다.
-      const out: ProcessedPage[] = [];
-      const ids: Record<string, string> = {};
-      const staged: Array<{ code: string; page: number; source: string; blob: Blob; profile: number[] }> = [];
+      const staged: Array<{ group: number; page: number; source: string; blob: Blob; profile: number[] }> = [];
       let k = 0;
-      setProcessed({ done: 0, total: need });
+      setProcessed({ done: 0, total: have });
       for (const src of opened.pages) {
         const image = await src.load();
         for (const part of applyLayout(image, layout)) {
-          const student = students[Math.floor(k / pagesPerStudent)];
-          const pageNo = (k % pagesPerStudent) + 1;
-          staged.push({ code: student.code, page: pageNo, source: src.source, ...(await stagePage({ source: src.source, index: src.index, image: part })) });
+          staged.push({ group: Math.floor(k / pagesPerStudent), page: (k % pagesPerStudent) + 1, source: src.source, ...(await stagePage({ source: src.source, index: src.index, image: part })) });
           k++;
           part.width = part.height = 0; // 캔버스 메모리를 바로 돌려준다
         }
         if ("close" in image) image.close();
         else image.width = image.height = 0;
-        setProcessed({ done: k, total: need });
+        setProcessed({ done: k, total: have });
       }
-      // 순서 확인 조각: 빈 시험지가 있으면 1쪽 머리글에서 "반·번호"만 잘라 보여 준다 (이름 글씨는 들어가지 않는다)
-      if (blankPdf) {
-        const numberBox = await headerNumberBox(blankPdf).catch(() => null);
-        if (numberBox) {
-          for (const st of staged.filter(x => x.page === 1)) {
-            const scan = await grayFromBlob(st.blob);
-            const key = `0:${scan.w}x${scan.h}`;
-            let blank = blankCache.current.get(key);
-            if (!blank) {
-              blank = await renderBlankPage(blankPdf, 0, scan.w, scan.h);
-              blankCache.current.set(key, blank);
-            }
-            const url = URL.createObjectURL(await grayToPng(cropByRegistration(scan, register(scan, blank), numberBox)));
-            ids[st.code] = url;
-            urls.current.push(url);
+      // "반·번호" 조각: 1쪽 머리글에서 가장 오른쪽 "이름" 글자 앞까지만 (이름 글씨는 들어가지 않는다)
+      const crops: Array<{ url: string; png: Blob } | null> = Array(groupCount).fill(null);
+      if (numberBox && blankPdf) {
+        for (const st of staged.filter(x => x.page === 1)) {
+          const scan = await grayFromBlob(st.blob);
+          const key = `0:${scan.w}x${scan.h}`;
+          let blank = blankCache.current.get(key);
+          if (!blank) {
+            blank = await renderBlankPage(blankPdf, 0, scan.w, scan.h);
+            blankCache.current.set(key, blank);
           }
+          const png = await grayToPng(cropByRegistration(scan, register(scan, blank), numberBox));
+          const url = URL.createObjectURL(png);
+          urls.current.push(url);
+          crops[st.group] = { url, png };
         }
       }
+      // 묶음 → 학생
+      let codes: Array<string | null> = students.map(s => s.code);
+      let reads: Array<number | null> = Array(groupCount).fill(null);
+      let problems: string[] = Array(groupCount).fill("");
+      if (byNumber) {
+        const response = await fetch("/api/assessment/numbers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-STATEtistic-Access-Key": accessKey },
+          body: JSON.stringify({ crops: await Promise.all(crops.map(async (c, g) => ({ id: `G${g}`, image: c ? await blobToBase64(c.png) : "" }))) }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? "반·번호를 읽지 못했습니다.");
+        setCellUsd(v => v + (Number(data.usd) || 0));
+        const got = new Map((data.rows as Array<{ id: string; number: number | null; sure: boolean }>).map(r => [r.id, r]));
+        reads = crops.map((_, g) => got.get(`G${g}`)?.number ?? null);
+        const { matches, unscanned } = matchGroups(reads.map((number, group) => ({ group, number, sure: got.get(`G${group}`)?.sure })), roster);
+        codes = matches.map(m => m.code);
+        problems = matches.map(m => m.problem);
+        // 스캔이 없는 번호는 결시로 바꾸고, 스캔이 있는 번호는 응시로 둔다
+        setRoster(rs => rs.map(s => ({ ...s, absent: unscanned.includes(s.number) })));
+        setAbsentText(unscanned.join(", "));
+      }
+      const groupCode = (g: number) => codes[g] ?? `미정${g + 1}`;
       // 쪽 번호마다 반 전체와 비교해 밀린 만큼 가림 띠를 늘린다 (줄이지는 않는다)
+      const out: ProcessedPage[] = [];
       for (let pageNo = 1; pageNo <= pagesPerStudent; pageNo++) {
         const group = staged.filter(st => st.page === pageNo);
         const shifts = estimateShifts(group.map(st => st.profile));
         for (let i = 0; i < group.length; i++) {
           const st = group[i];
-          const result = await processStaged(st.blob, st.source, st.code, pageNo, template, shifts[i]);
+          const result = await processStaged(st.blob, st.source, groupCode(st.group), pageNo, template, shifts[i]);
           out.push(result.processed);
           urls.current.push(result.processed.url);
         }
       }
-      const order = new Map(students.map((st, i) => [st.code, i]));
-      out.sort((a, b) => (order.get(a.code)! - order.get(b.code)!) || a.page - b.page);
+      const numberOf = new Map(roster.map(s => [s.code, s.number]));
+      out.sort((a, b) => ((numberOf.get(a.code) ?? 999) - (numberOf.get(b.code) ?? 999)) || a.code.localeCompare(b.code) || a.page - b.page);
       setPages(out);
-      setIdentity(ids);
+      setIdentity(Object.fromEntries(crops.flatMap((c, g) => (c ? [[groupCode(g), c.url]] : []))));
+      setGroups(crops.map((c, g) => ({ group: g, crop: c?.url ?? "", read: reads[g], code: groupCode(g), problem: problems[g], auto: byNumber })));
     } catch (e) {
       setPageError(e instanceof Error ? e.message : String(e));
     } finally {
       await close();
       setProcessing(false);
     }
+  }
+
+  /** 교사가 스캔 묶음을 다른 학생에게 옮긴다 (번호를 잘못 읽었거나 못 읽었을 때). 그 학생에게 있던 묶음은 "미정"이 된다 */
+  function assignGroup(group: number, code: string) {
+    const target = groups.find(x => x.group === group);
+    if (!target || target.code === code) return;
+    const holder = groups.find(x => x.code === code);
+    const rename = new Map<string, string>([[target.code, code]]);
+    if (holder) rename.set(code, `미정${holder.group + 1}`);
+    setPages(ps => ps.map(p => {
+      const next = rename.get(p.code);
+      return next ? { ...p, code: next, file: `${next}_p${p.page}.jpg` } : p;
+    }));
+    setIdentity(ids => Object.fromEntries(Object.entries(ids).map(([c, url]) => [rename.get(c) ?? c, url])));
+    const nextGroups = groups.map(x => (x.group === group ? { ...x, code, problem: "교사가 맞춤" } : holder && x.group === holder.group ? { ...x, code: `미정${x.group + 1}`, problem: "다른 묶음에 번호를 넘겨줌" } : x));
+    setGroups(nextGroups);
+    const scanned = new Set(nextGroups.map(x => x.code));
+    setRoster(rs => rs.map(s => ({ ...s, absent: !scanned.has(s.code) })));
+    setAbsentText(roster.filter(s => !scanned.has(s.code)).map(s => s.number).join(", "));
+    setApprovedHashes(null);
+    setChecked(false);
   }
 
   async function processAll(images: Array<ImageBitmap | HTMLCanvasElement>, sources: string[], act: Student[], perStudent: number, tpl: typeof template) {
@@ -465,6 +516,11 @@ export function GradingProvider({ children }: { children: ReactNode }) {
   }
 
   function approve() {
+    if (groups.some(x => x.code.startsWith("미정"))) {
+      setPageError("학생을 정하지 못한 스캔 묶음이 있습니다. 아래 표에서 학생을 골라 주세요.");
+      return;
+    }
+    setPageError("");
     setApprovedHashes(Object.fromEntries(pages.map(p => [p.file, p.sha256])));
   }
 
@@ -813,7 +869,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
     keyName, items, keyError, applyKey, assessmentId, setAssessmentId, source, setSource,
     templateId, setTemplateId, pagesPerStudent, setPagesPerStudent, layoutId, setLayoutId, processed, students, names,
     pages, pagesByCode, identity, pageError, processing, checked, setChecked, approved: approvedHashes != null,
-    handlePhotos, approve, demo, startDemo, readings, failedCodes, progress, runOcr, ocrUsage,
+    handlePhotos, approve, groups, assignGroup, demo, startDemo, readings, failedCodes, progress, runOcr, ocrUsage,
     reviewAll, setReviewAll, readReview, setReadReview, essayReview, setEssayReview,
     essayBusy, essayError, suggestEssay, suggestAllEssays, essayUsage, result, resultCsv,
     form, formName, blankPdf, formError, applyForm, setBlank, useCells, cellInfo, cellUsd,

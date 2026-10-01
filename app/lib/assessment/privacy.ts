@@ -110,3 +110,26 @@ export async function sha256Hex(data: ArrayBuffer | Uint8Array) {
   const digest = await crypto.subtle.digest("SHA-256", bytes as unknown as ArrayBuffer);
   return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, "0")).join("");
 }
+
+export type GroupRead = { group: number; number: number | null; sure?: boolean };
+export type GroupMatch = { code: string | null; problem: string };
+
+/**
+ * 스캔 묶음(학생 한 명분)마다 읽은 번호로 학생을 맞춘다. 확실하지 않으면 맞추지 않고 이유를 남긴다(교사가 고른다).
+ * 번호가 겹치는 묶음은 어느 쪽도 맞추지 않는다. 스캔이 없는 번호는 결시 후보로 돌려준다.
+ */
+export function matchGroups(reads: GroupRead[], roster: Student[]): { matches: GroupMatch[]; unscanned: number[] } {
+  const byNumber = new Map(roster.map(s => [s.number, s]));
+  const count = new Map<number, number>();
+  for (const r of reads) if (r.number != null) count.set(r.number, (count.get(r.number) ?? 0) + 1);
+  const matches = reads.map(r => {
+    if (r.number == null) return { code: null, problem: "번호를 읽지 못함" };
+    const st = byNumber.get(r.number);
+    if (!st) return { code: null, problem: `${r.number}번은 학생 번호 범위 밖` };
+    if ((count.get(r.number) ?? 0) > 1) return { code: null, problem: `${r.number}번이 다른 묶음과 겹침` };
+    // 애매한 글씨(3/7 등)는 맞추되 교사가 조각을 보고 확인하게 표시한다
+    return { code: st.code, problem: r.sure === false ? "번호 글씨가 애매함 — 조각을 보고 확인" : st.absent ? "결시로 표시했던 번호" : "" };
+  });
+  const scanned = new Set(matches.map(m => m.code).filter(Boolean));
+  return { matches, unscanned: roster.filter(s => !scanned.has(s.code)).map(s => s.number) };
+}

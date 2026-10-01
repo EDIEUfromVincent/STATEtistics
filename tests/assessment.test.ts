@@ -386,3 +386,23 @@ test("빈 시험지 PDF 글자에서 칸을 찾는다", () => {
   assert.ok(isAnswerPage(r.answerText) && r.answerText.includes("짧아"));
   assert.ok(c["6-1"].region[0] < c["6-2"].region[0]);
 });
+
+import { matchGroups } from "../app/lib/assessment/privacy.ts";
+
+test("스캔 묶음은 읽은 번호로 학생에게 맞추고, 애매하면 맞추지 않는다", () => {
+  const roster = numberRoster(30);
+  const code = (n: number) => roster[n - 1].code;
+  const { matches, unscanned } = matchGroups([
+    { group: 0, number: 13 }, { group: 1, number: 26 }, { group: 2, number: 7 }, { group: 3, number: 17 },
+    { group: 4, number: null }, { group: 5, number: 31 }, { group: 6, number: 9 }, { group: 7, number: 9 },
+  ], roster);
+  assert.deepEqual(matches.slice(0, 4).map(m => m.code), [code(13), code(26), code(7), code(17)]);
+  assert.equal(matches[4].code, null); // 못 읽음
+  assert.match(matches[5].problem, /범위 밖/);
+  assert.equal(matches[6].code, null); // 9번이 겹치면 어느 쪽도 맞추지 않는다
+  assert.equal(matches[7].code, null);
+  assert.ok(unscanned.includes(9) && unscanned.includes(1) && !unscanned.includes(13));
+  const unsure = matchGroups([{ group: 0, number: 3, sure: false }], roster).matches[0];
+  assert.equal(unsure.code, code(3));
+  assert.match(unsure.problem, /애매/);
+});

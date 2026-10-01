@@ -25,6 +25,32 @@ export default function PhotosStep() {
         {ready ? `응시 ${g.students.length}명 × ${g.pagesPerStudent}쪽 = ${g.students.length * g.pagesPerStudent}쪽이 필요합니다 · 이름 칸은 이 브라우저에서 검게 가립니다` : ""}
       </DropZone>
       {g.pageError && <div className="model-error">{g.pageError}</div>}
+      {g.groups.some(x => x.auto) && (() => {
+        const pending = g.groups.filter(x => x.code.startsWith("미정")).length;
+        const flagged = g.groups.filter(x => x.problem && !x.code.startsWith("미정")).length;
+        const absent = g.roster.filter(s => s.absent).map(s => s.number);
+        return <div className="match-box">
+          <h4>학생 맞추기 · 스캔 {g.groups.length}명분</h4>
+          <p className={pending ? "warn-note" : "ok-note"}>
+            {pending ? `학생을 정하지 못한 묶음 ${pending}개가 있습니다. 반·번호 조각을 보고 학생을 골라 주세요.` : "모든 묶음을 학생에게 맞췄습니다."}
+            {flagged ? ` 확인할 점이 있는 묶음 ${flagged}개도 한 번 보세요.` : ""}
+            {absent.length ? ` 스캔이 없어 결시로 둔 번호: ${absent.join(", ")}` : ""}
+          </p>
+          <p className="helper-line">스캔 순서와 상관없이, 각 학생 1쪽 머리글의 반·번호 숫자를 읽어 맞췄습니다(이름 칸은 잘라 내고 보냄).</p>
+          <div className="table-scroll small-table"><table><thead><tr><th>묶음</th><th>반·번호 조각</th><th>읽은 번호</th><th>학생</th><th>확인할 점</th></tr></thead><tbody>
+            {g.groups.map(x => <tr key={x.group} className={x.code.startsWith("미정") || x.problem.includes("애매") ? "warn-row" : ""}>
+              <td>{x.group + 1}</td>
+              <td>{x.crop ? <img className="number-crop" src={x.crop} alt={`묶음 ${x.group + 1} 반·번호`} /> : <small>없음</small>}</td>
+              <td>{x.read ?? "–"}</td>
+              <td><select value={x.code} onChange={e => g.assignGroup(x.group, e.target.value)}>
+                {x.code.startsWith("미정") && <option value={x.code}>고르세요</option>}
+                {g.roster.map(s => <option key={s.code} value={s.code}>{studentLabel(s)}</option>)}
+              </select></td>
+              <td><small>{x.problem}</small></td>
+            </tr>)}
+          </tbody></table></div>
+        </div>;
+      })()}
       {g.pages.length > 0 && <>
         <ol className="helper-line">
           <li>{Object.keys(g.identity).length ? "왼쪽 \"반·번호\" 조각(이름은 잘라 냄)의 번호가 학생 번호와 같은지 확인하세요." : "빈 시험지 PDF를 정답표 단계에서 넣으면, 순서 확인용으로 각 학생의 \"반·번호\" 부분만 잘라 보여 줍니다."}</li>
