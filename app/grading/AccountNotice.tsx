@@ -13,7 +13,7 @@ export function AccountNotice({ purpose = "판독" }: { purpose?: string }) {
   if (!g.me.teacher) {
     return <div className="account-notice warn">
       <span>{purpose}하려면 구글로 로그인하세요. 판독 요금은 선생님 각자의 API 키로 나갑니다.</span>
-      {g.me.loginReady ? <a className="primary-action" href={`/api/auth/google?next=${encodeURIComponent(path)}`}>구글로 로그인</a> : <small>서버에 구글 로그인 설정이 아직 없습니다.</small>}
+      {g.me.loginReady ? <a className="primary-action" href={`/api/auth/google?next=${encodeURIComponent(path)}`}>구글로 로그인</a> : <small>서버 설정에 빠진 값: {g.me.loginMissing?.join(", ") || "구글 로그인 설정"}</small>}
     </div>;
   }
   const k = g.me.keys;

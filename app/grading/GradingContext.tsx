@@ -48,7 +48,7 @@ export type CellInfo = { crop: string; a: string | null; b: string | null; note:
 export type Progress = { done: number; total: number; errors: string[] };
 
 // 로그인한 선생님과 그 선생님이 넣은 API 키 상태(끝 네 자리). 판독 요금은 각자 키로 나간다
-export type Me = { teacher: { email: string; name: string } | null; keys?: { gemini: string; geminiPaid: boolean; geminiModel?: string; anthropic: string }; loginReady: boolean } | null;
+export type Me = { teacher: { email: string; name: string } | null; keys?: { gemini: string; geminiPaid: boolean; geminiModel?: string; anthropic: string }; loginReady: boolean; loginMissing?: string[] } | null;
 
 type GradingState = {
   me: Me; signedIn: boolean; refreshMe: () => Promise<void>; health: Health; pricing: Pricing;

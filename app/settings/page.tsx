@@ -43,7 +43,7 @@ export default function SettingsPage() {
         {!g.me ? <p className="helper-line">확인 중…</p> : !g.me.teacher ? (
           <section className="grading-card">
             <header><h3>먼저 구글로 로그인하세요</h3><p>로그인하면 선생님마다 따로 키와 채점 기록을 둡니다.</p></header>
-            {g.me.loginReady ? <a className="primary-action" href="/api/auth/google?next=/settings">구글로 로그인</a> : <p className="warn-note">서버에 구글 로그인 설정이 아직 없습니다.</p>}
+            {g.me.loginReady ? <a className="primary-action" href="/api/auth/google?next=/settings">구글로 로그인</a> : <p className="warn-note">서버 설정에 빠진 값: {g.me.loginMissing?.join(", ") || "구글 로그인 설정"}</p>}
           </section>
         ) : <>
           <section className="grading-card">
