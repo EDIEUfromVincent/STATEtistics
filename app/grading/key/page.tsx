@@ -20,10 +20,11 @@ export default function KeyStep() {
     <section className="grading-card">
       <header><span>2</span><h3>시험지 넣기</h3><p>학생에게 나눠 준 것과 같은 <b>빈 시험지 PDF</b>(정답·해설 쪽 포함)를 넣으세요. 앱이 답 칸 위치를 찾고, 정답·해설 쪽을 읽어 정답표 초안을 만듭니다. 표를 확인하고 &quot;확정&quot;을 누르면 채점 준비가 끝납니다. 시험지 PDF는 이 브라우저에서만 쓰고 저장하지 않으며, 초안을 만들 때 문제·해설의 글자만 판독 서버로 보냅니다.</p></header>
 
-      {!g.accessKey && <div className="grading-row">
-        <label className="access-key-control">접속 코드<input type="password" autoComplete="off" value={g.accessKey} onChange={e => g.updateAccessKey(e.target.value)} placeholder="이 탭을 닫으면 지워집니다" /></label>
-        <p className="helper-line">정답표 초안을 만들 때 필요합니다.</p>
-      </div>}
+      {/* 항상 보인다: 비어 있을 때만 보이게 했더니 첫 글자를 치자마자 칸이 사라졌다 */}
+      <div className="grading-row">
+        <label className="access-key-control">접속 코드<input type="password" autoComplete="off" value={g.accessKey} onChange={e => g.updateAccessKey(e.target.value)} placeholder="Railway의 STATETISTIC_ACCESS_KEY 값" /></label>
+        <p className="helper-line">정답표 초안을 만들 때 필요합니다. 이 탭을 닫으면 지워집니다.</p>
+      </div>
 
       <DropZone accept=".pdf,application/pdf" disabled={!!g.draftBusy} onFiles={files => g.learnFromPdf(files[0])}
         title={g.draftBusy || (g.blankPdf && !d ? `넣은 시험지: ${g.blankPdf.name} — 다른 시험지로 바꾸려면 다시 넣으세요` : "빈 시험지 PDF를 여기에 끌어다 놓거나 눌러서 고르세요")}>
