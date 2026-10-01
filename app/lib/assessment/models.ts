@@ -7,7 +7,6 @@ export const GEMINI_MODELS: GeminiModel[] = [
   { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash (권장)", input: 0.75, output: 3.75, perClass: "한 반 약 1,600원", note: "6-4반 검증에 쓴 모델입니다. 2027년부터 요금이 두 배가 됩니다." },
   { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash", input: 0.75, output: 3.75, perClass: "한 반 약 1,600원", note: "3.8과 요금이 같습니다. 2027년부터 요금이 두 배가 됩니다." },
   { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash", input: 0.75, output: 3.75, perClass: "한 반 약 1,600원", note: "3.8과 요금이 같습니다. 2027년부터 요금이 두 배가 됩니다." },
-  { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash", input: 1.5, output: 9, perClass: "한 반 약 3,200원", note: "요금표상 3.6~3.8보다 비쌉니다." },
 ];
 
 export const geminiModelOf = (id?: string | null) => GEMINI_MODELS.find(m => m.id === id) ?? GEMINI_MODELS[0];
