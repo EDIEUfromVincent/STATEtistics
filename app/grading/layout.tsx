@@ -55,7 +55,9 @@ function StepBar() {
         })}
       </ol>
       <div className="step-side">
-        <span className={g.health?.ready ? "ok-note" : "warn-note"}>{g.health == null ? "서버 확인 중…" : g.health.ready ? `판독 준비됨 (${g.health.model})` : `판독 설정 필요: ${g.health.missing.join(", ")}`}</span>
+        {g.useCells
+          ? <span className={g.health?.cells?.ready ? "ok-note" : "warn-note"}>{g.health == null ? "서버 확인 중…" : g.health.cells?.ready ? `칸 판독 준비됨 (${g.health.cells.a}${g.health.cells.b ? ` + ${g.health.cells.b}` : ""})` : `칸 판독 설정 필요: ${g.health.cells?.missing.join(", ") ?? ""}`}</span>
+          : <span className={g.health?.ready ? "ok-note" : "warn-note"}>{g.health == null ? "서버 확인 중…" : g.health.ready ? `판독 준비됨 (${g.health.model})` : `판독 설정 필요: ${g.health.missing.join(", ")}`}</span>}
         <button className="secondary-action" onClick={demo} disabled={g.processing}>{g.processing ? "가상 반 준비 중…" : "가상 반으로 체험하기"}</button>
       </div>
     </section>

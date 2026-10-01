@@ -31,6 +31,9 @@ export function geminiConfig() {
  * 다른 모델은 GEMINI_THINKING_BUDGET으로 직접 정한다.
  */
 function thinkingConfig(model: string) {
+  // Gemini 3 계열은 생각 수준(low/medium/high)으로 정한다. 기본값에서는 생각이 폭주해 2분 제한에 걸리는 일이 있었다
+  const level = process.env.GEMINI_THINKING_LEVEL?.trim();
+  if (level && /^gemini-3/.test(model)) return { thinkingLevel: level };
   const env = process.env.GEMINI_THINKING_BUDGET?.trim();
   if (env) return { thinkingBudget: Number(env) };
   if (/^gemini-2\.5-flash/.test(model)) return { thinkingBudget: 0 };
@@ -39,19 +42,24 @@ function thinkingConfig(model: string) {
 
 /** 학생 자료를 다루므로 접속 코드가 설정되지 않았으면 열어 두지 않는다 (fail closed). */
 export function assertReady(request: Request) {
+  assertAccess(request);
   const cfg = geminiConfig();
-  if (!cfg.accessKeySet) throw new AssessmentApiError("Railway에 STATETISTIC_ACCESS_KEY(접속 코드)를 먼저 설정해 주세요.", 503);
   if (!cfg.apiKey) throw new AssessmentApiError("Railway에 GEMINI_API_KEY를 설정해 주세요.", 503);
   if (!cfg.paidTier) {
     throw new AssessmentApiError("학생 자료는 Gemini 유료 등급에서만 처리합니다. 유료 등급 키라면 Railway에 GEMINI_PAID_TIER=true를 설정해 주세요.", 503);
   }
+  return cfg;
+}
+
+/** 접속 코드 확인 + 요청 수 제한. 접속 코드가 설정되지 않았으면 모든 요청을 막는다 */
+export function assertAccess(request: Request) {
+  if (!process.env.STATETISTIC_ACCESS_KEY?.trim()) throw new AssessmentApiError("Railway에 STATETISTIC_ACCESS_KEY(접속 코드)를 먼저 설정해 주세요.", 503);
   const expected = process.env.STATETISTIC_ACCESS_KEY!.trim();
   const provided = request.headers.get("x-statetistic-access-key")?.trim() ?? "";
   let difference = provided.length ^ expected.length;
   for (let i = 0; i < expected.length; i++) difference |= expected.charCodeAt(i) ^ (provided.charCodeAt(i) || 0);
   if (difference !== 0) throw new AssessmentApiError("접속 코드가 올바르지 않습니다.", 401);
   rateLimit(request);
-  return cfg;
 }
 
 const hits = new Map<string, number[]>();
@@ -125,7 +133,7 @@ export function errorResponse(error: unknown) {
   return Response.json({ error: reason.message }, { status: reason.status });
 }
 
-export type OcrItemSpec = { no: string; kind: string; choices: number; ox: number };
+export type OcrItemSpec = { no: string; kind: string; choices: number; ox: number; hint: string };
 const KINDS = new Set(["선택형", "복수선택", "기호", "OX", "단답", "서술"]);
 
 export function validateSpecs(value: unknown): OcrItemSpec[] {
@@ -133,7 +141,8 @@ export function validateSpecs(value: unknown): OcrItemSpec[] {
   return value.map(v => {
     const s = v as OcrItemSpec;
     if (typeof s.no !== "string" || s.no.length > 8 || !KINDS.has(s.kind)) throw new AssessmentApiError("문항 정보가 올바르지 않습니다.", 400);
-    return { no: s.no, kind: s.kind, choices: Math.min(20, Math.max(0, Number(s.choices) || 0)), ox: Math.min(20, Math.max(0, Number(s.ox) || 0)) };
+    const hint = typeof s.hint === "string" ? s.hint.replace(/[\r\n]+/g, " ").slice(0, 120) : "";
+    return { no: s.no, kind: s.kind, choices: Math.min(20, Math.max(0, Number(s.choices) || 0)), ox: Math.min(20, Math.max(0, Number(s.ox) || 0)), hint };
   });
 }
 
@@ -146,17 +155,22 @@ function itemLine(s: OcrItemSpec) {
     단답: "낱말이나 짧은 구",
     서술: "문장",
   };
-  return `- ${s.no}번: ${s.kind} (${extra[s.kind]})`;
+  return `- ${s.no}: ${s.kind} (${extra[s.kind]})${s.hint ? ` — 위치: ${s.hint}` : ""}`;
 }
 
 export function readPrompt(specs: OcrItemSpec[], pageCount: number) {
   return `이 이미지 ${pageCount}장은 초등학생 한 명의 시험지 1~${pageCount}쪽입니다. 아래 문항에 학생이 직접 쓰거나 표시한 답을 보이는 그대로 옮겨 적으세요.
 - 문항이 어느 쪽에 있든 찾아서 답합니다. 한 문항이 두 쪽에 걸쳐 있으면 학생이 표시한 곳을 따릅니다.
 - 채점하거나 맞춤법을 고치지 마세요. 틀린 답도 그대로 적습니다.
+- 절대 문제를 직접 풀어서 채우지 마세요. 학생이 비워 둔 칸은 반드시 빈 문자열입니다.
+- "위치"는 그 칸이 시험지의 어디인지 알려 줄 뿐 정답이 아닙니다. 그 칸에 학생이 쓴 것만 적습니다.
+- ( 가 / 나 ) 처럼 고르는 칸은 학생이 ○표 하거나 표시한 낱말 하나만 적습니다. 표시가 없으면 빈 문자열입니다.
 - 인쇄된 문제 글과 보기는 답이 아닙니다. 학생이 동그라미 친 보기 번호는 ③처럼 적습니다.
 - ○/× 문항은 칸 순서대로 '○,○,×'처럼 적습니다.
 - 답이 없으면 빈 문자열, 읽기 어려우면 가장 그럴듯한 판독을 적고 confidence를 0.5 이하로 적습니다.
 - 검게 가려진 부분은 무시하세요.
+- 학생이 답에 실제 사람 이름(자기나 친구 이름)을 썼으면 그 이름만 [이름]으로 바꿔 적으세요. 문제에 인쇄된 이름은 그대로 둡니다.
+- 한 문항에 빈칸이 여러 개면 "번호-칸" 문항(예: 6-1, 6-2)으로 나뉘어 있으니 해당 칸의 답만 적습니다.
 문항:
 ${specs.map(itemLine).join("\n")}`;
 }
@@ -171,20 +185,36 @@ export function gradePrompt(no: string, points: number, rubric: string, answer: 
 - reason에는 한 문장으로 이유를 적습니다.`;
 }
 
-export const READ_SCHEMA = {
-  type: "OBJECT",
-  properties: {
-    answers: {
-      type: "ARRAY",
-      items: {
-        type: "OBJECT",
-        properties: { item: { type: "STRING" }, answer: { type: "STRING" }, confidence: { type: "NUMBER" } },
-        required: ["item", "answer", "confidence"],
+/** 문항 번호를 목록의 값으로만 쓰게 강제한다 (6-1번, 6(1) 같은 변형이 나오면 답을 잃는다) */
+export function readSchema(itemNos: string[]) {
+  return {
+    type: "OBJECT",
+    properties: {
+      answers: {
+        type: "ARRAY",
+        items: {
+          type: "OBJECT",
+          properties: { item: { type: "STRING", enum: itemNos }, answer: { type: "STRING" }, confidence: { type: "NUMBER" } },
+          required: ["item", "answer", "confidence"],
+        },
       },
     },
-  },
-  required: ["answers"],
-};
+    required: ["answers"],
+  };
+}
+
+/** 모델이 적은 문항 번호를 목록의 번호로 맞춘다: "6-1번", "6(1)", "6 - 1", "l3" → "6-1", "L3" */
+export function normalizeItemNo(raw: unknown, known: Set<string>) {
+  const s = String(raw ?? "").trim();
+  if (known.has(s)) return s;
+  const cleaned = s
+    .replace(/^문항\s*/, "")
+    .replace(/번$/, "")
+    .replace(/\s+/g, "")
+    .replace(/^(\w+?)[(.]\s*(\d+)\)?$/, "$1-$2")
+    .toUpperCase();
+  return known.has(cleaned) ? cleaned : null;
+}
 
 export const GRADE_SCHEMA = {
   type: "OBJECT",

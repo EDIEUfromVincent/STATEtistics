@@ -28,6 +28,16 @@ export default function KeyStep() {
         <div className="table-scroll small-table"><table><thead><tr><th>문항</th><th>유형</th><th>정답</th><th>배점</th><th>성취기준</th><th>행동영역</th><th>난이도</th><th>매핑</th></tr></thead><tbody>
           {g.items.map(i => <tr key={i.no}><td>{i.no}</td><td>{i.kind}</td><td className="essay-cell">{i.kind === "서술" ? <small>{i.rubric}</small> : i.answer}</td><td>{i.points}</td><td>{i.standard}</td><td>{i.domain}</td><td>{i.difficulty}</td><td className={i.mappingStatus && i.mappingStatus !== "확인" ? "bad-cell" : ""}>{i.mappingStatus}</td></tr>)}
         </tbody></table></div>
+        <div className="rubric-box">
+          <b>양식 기반 판독 (권장)</b>
+          <p>양식 파일(칸 위치 JSON)과 빈 시험지 PDF를 함께 넣으면 쪽 전체 대신 <b>답 칸 조각만</b> 판독기로 보냅니다. 빈칸과 고르는 칸은 AI 없이 잉크로 판정하고, 손글씨 칸은 서로 다른 두 모델이 같게 읽을 때만 자동 확정합니다. 빈 시험지는 이 브라우저에서만 씁니다.</p>
+          <div className="grading-actions">
+            <label className="secondary-action file-button">양식 파일(JSON){g.formName ? ` · ${g.formName}` : ""}<input type="file" accept=".json,application/json" onChange={async e => { const f = e.target.files?.[0]; if (f) g.applyForm(await f.text(), f.name); e.target.value = ""; }} /></label>
+            <label className="secondary-action file-button">빈 시험지 PDF{g.blankPdf ? ` · ${g.blankPdf.name}` : ""}<input type="file" accept=".pdf,application/pdf" onChange={e => { g.setBlank(e.target.files?.[0] ?? null); e.target.value = ""; }} /></label>
+          </div>
+          {g.formError && <pre className="model-error">{g.formError}</pre>}
+          {g.form && <p className="helper-line">{g.form.form} · {g.form.pages}쪽 · 칸 {Object.keys(g.form.cells).length}개 {g.useCells ? "→ 양식 기반 판독을 씁니다" : "→ 빈 시험지 PDF도 넣어 주세요"}</p>}
+        </div>
         {unmapped.length > 0 && <p className="warn-note">성취기준 매핑이 확인되지 않은 문항: {unmapped.join(", ")} — 정답표의 매핑상태 열을 &quot;확인&quot;으로 바꾸면 이 표시가 사라집니다.</p>}
         <div className="step-next">{g.roster.length > 0 ? <Link className="primary-action" href="/grading/photos">다음: 사진 넣기 →</Link> : <Link className="primary-action" href="/grading">명부 만들러 가기 →</Link>}</div>
       </>}

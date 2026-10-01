@@ -48,7 +48,7 @@ test("단답형은 단어로만 인정한다 ('물질' 속 '물'은 아님)", ()
 function item(kind: ItemKind, answer: string, extra: Partial<Item> = {}): Item {
   return {
     no: "1", pages: [1], kind, answer, points: 5, standard: "[6과14-02]", choices: 5, rubric: "", domain: "",
-    difficulty: "", content: "", mappingStatus: "", parsed: parseAnswer(kind, answer), ...extra,
+    difficulty: "", content: "", mappingStatus: "", hint: "", parsed: parseAnswer(kind, answer), ...extra,
   };
 }
 
@@ -87,7 +87,7 @@ test("OCR 요청 정보에는 정답이 없다", () => {
   const items = loadAnswerKey(SAMPLE_KEY_CSV);
   for (const it of items) {
     const spec = ocrSpec(it);
-    assert.deepEqual(Object.keys(spec).sort(), ["choices", "kind", "no", "ox"]);
+    assert.deepEqual(Object.keys(spec).sort(), ["choices", "hint", "kind", "no", "ox"]);
     assert.ok(!JSON.stringify(spec).includes(it.answer) || it.answer === "");
   }
 });
@@ -205,4 +205,104 @@ test("미확정 서술형이 있으면 정답률을 계산하지 않는다", () 
 
 test("sha256", async () => {
   assert.equal(await sha256Hex(new TextEncoder().encode("abc")), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+});
+
+test("스캔 위치 맞춤: 밀린 쪽을 찾아 가림 띠를 늘리고, 절대 줄이지 않는다", async () => {
+  const { estimateShifts, shiftRegion, PROFILE_H } = await import("../app/lib/assessment/align.ts");
+  // 인쇄된 줄 3개가 있는 1쪽 모양. 한 명은 10행(약 6%) 아래로 밀렸다
+  const base = Array.from({ length: 102 }, (_, i) => ([20, 21, 30, 45, 46, 70, 88].includes(i) ? 0.8 : 0.02));
+  const shifted = (k: number) => base.map((_, i) => base[i - k] ?? 0.02);
+  const profiles = [base, base, shifted(10), base, shifted(-4), base];
+  const shifts = estimateShifts(profiles);
+  assert.equal(Math.round(shifts[2] * PROFILE_H), 10);
+  assert.equal(Math.round(shifts[4] * PROFILE_H), -4);
+  assert.equal(shifts[0], 0);
+  const band: [number, number, number, number] = [0, 0, 1, 0.16];
+  assert.ok(shiftRegion(band, 0.06)[3] >= 0.22); // 아래로 밀리면 늘린다
+  assert.equal(shiftRegion(band, -0.05)[3], band[3] + 0.01); // 위로 밀려도 원래 영역은 그대로 덮는다
+  assert.deepEqual(shiftRegion(band, 0), band);
+  assert.deepEqual(estimateShifts([base, shifted(8)]), [0, 0]); // 비교 대상이 적으면 재지 않는다
+});
+
+test("판독 문항 번호 맞추기: 흔한 변형을 정답표 번호로", async () => {
+  const { normalizeItemNo } = await import("../app/api/assessment/_gemini.ts");
+  const known = new Set(["1", "6-1", "14-3", "L3", "L5-2"]);
+  assert.equal(normalizeItemNo("6-1", known), "6-1");
+  assert.equal(normalizeItemNo("6-1번", known), "6-1");
+  assert.equal(normalizeItemNo("6(1)", known), "6-1");
+  assert.equal(normalizeItemNo("6 - 1", known), "6-1");
+  assert.equal(normalizeItemNo("문항 1", known), "1");
+  assert.equal(normalizeItemNo("l3", known), "L3");
+  assert.equal(normalizeItemNo("L5(2)", known), "L5-2");
+  assert.equal(normalizeItemNo("7", known), null);
+});
+
+// ---- 양식 기반 칸 판독 --------------------------------------------------------
+import { decide, jamoDistance, SURE, UNSURE } from "../app/lib/assessment/decide.ts";
+import { FormError, parseForm } from "../app/lib/assessment/form.ts";
+
+const KEY6 = loadAnswerKey(`문항,유형,정답,배점,성취기준,채점기준
+6-2,단답,높아=높아지=높아져=높아지고=높,1,[6과13-01],
+1,선택형,③,1,[6과13-01],
+L3,서술,,2,[6과13-02],자전축 기울기와 공전을 함께 쓰면 2점`);
+const it = (no: string) => KEY6.find(i => i.no === no)!;
+
+test("자모 거리", () => {
+  assert.equal(jamoDistance("높아", "높아"), 0);
+  assert.equal(jamoDistance("놓아", "높아"), 1);
+  assert.ok(jamoDistance("겨울", "높아") > 2);
+});
+
+test("두 판독이 같고 정답이면 자동 정답, 정답과 한두 자모 차이면 교사 확인", () => {
+  assert.equal(decide(it("6-2"), "높아", "높아").confidence, SURE);
+  // 두 모델이 똑같이 '놓아'로 잘못 읽은 실제 사례: 정답과 가까우므로 자동 오답으로 처리하지 않는다
+  assert.equal(decide(it("6-2"), "놓아", "놓아").confidence, UNSURE);
+  assert.equal(decide(it("6-2"), "놓아진다", "놓아진다").confidence, UNSURE);
+  // 확실히 다른 오답은 자동 오답
+  assert.equal(decide(it("6-2"), "낮아", "낮아").confidence, UNSURE); // 낮아↔높아는 자모 2개 차이 → 교사
+  assert.equal(decide(it("6-2"), "겨울", "겨울").confidence, SURE);
+});
+
+test("두 판독이 다르거나 하나가 실패하면 교사 확인", () => {
+  assert.equal(decide(it("6-2"), "높아", "놀아").confidence, UNSURE);
+  assert.equal(decide(it("6-2"), "높아", null).confidence, UNSURE);
+  assert.equal(decide(it("1"), "③", "3").confidence, SURE); // 표기만 다르고 같은 번호
+  assert.equal(decide(it("1"), "③", "②").confidence, UNSURE);
+  assert.equal(decide(it("6-2"), "", "").confidence, SURE); // 둘 다 빈칸
+});
+
+test("서술형은 옮겨 적은 글만 넘기고 점수는 교사가 정한다", () => {
+  const d = decide(it("L3"), "자전축이 기울어져서", "자전축이 기울어서");
+  assert.equal(d.answer, "자전축이 기울어져서");
+  assert.match(d.note, /다른 판독/);
+});
+
+test("양식 파일 검사", () => {
+  const ok = JSON.stringify({ version: 1, form: "t", pages: 2, cells: { "6-2": { page: 1, kind: "write", region: [0.3, 0.6, 0.5, 0.65] }, "1": { page: 0, kind: "number", region: [0.04, 0.2, 0.96, 0.5], options: { "1": [0.06, 0.48, 0.09, 0.5] } } } });
+  assert.equal(Object.keys(parseForm(ok, ["6-2", "1"]).cells).length, 2);
+  assert.throws(() => parseForm(ok, ["6-2", "1", "L3"]), FormError); // 정답표 문항에 칸이 없음
+  assert.throws(() => parseForm(JSON.stringify({ version: 1, pages: 1, cells: { a: { page: 3, kind: "write", region: [0, 0, 1, 1] } } })), FormError);
+  assert.throws(() => parseForm("{"), FormError);
+});
+
+import { accuracyLabel, reasonOf } from "../app/lib/assessment/confidence.ts";
+import { BLANK_FIX } from "../app/lib/assessment/records.ts";
+
+test("교사가 빈칸으로 고치면 무응답으로 채점한다", () => {
+  const rows = buildRows(KEY6, { A1B: { "6-2": { answer: "높아", confidence: 0.3, nameHits: 0 } } }, {
+    assessmentId: "t", source: "", readReview: { "A1B|6-2": { fixed: BLANK_FIX } },
+  }).rows;
+  const r = rows.find(x => x.문항 === "6-2")!;
+  assert.equal(r.응답, "");
+  assert.equal(r.정오, "X");
+  assert.match(r.표시, /판독수정/);
+});
+
+test("교사 확인 이유와 잰 정확도", () => {
+  assert.equal(reasonOf("확인 판독(claude-sonnet-5-5)은 \"놓아\"로 읽음", false), "verifier");
+  assert.equal(reasonOf("정답과 한두 자모 차이 — 잘못 읽었을 수 있음", false), "near");
+  assert.equal(reasonOf("", true), "auto");
+  assert.match(accuracyLabel("verifier"), /^77\.8% \(36칸 중 28칸\)$/);
+  assert.match(accuracyLabel("marks"), /표본 적음/);
+  assert.equal(accuracyLabel("form"), "측정 전");
 });

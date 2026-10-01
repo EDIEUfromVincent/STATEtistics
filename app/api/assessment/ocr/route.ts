@@ -4,8 +4,9 @@ import {
   audit,
   callGemini,
   errorResponse,
-  READ_SCHEMA,
+  normalizeItemNo,
   readPrompt,
+  readSchema,
   sha256,
   validateSpecs,
 } from "../_gemini";
@@ -32,16 +33,21 @@ export async function POST(request: Request) {
     const { data, usage } = await callGemini(
       cfg,
       [{ text: readPrompt(specs, images.length) }, ...images.map(i => ({ inlineData: { mimeType: "image/jpeg", data: i.base64 } }))],
-      READ_SCHEMA,
+      readSchema(specs.map(s => s.no)),
     );
+    const known = new Set(specs.map(s => s.no));
+    const got = new Map<string, Record<string, unknown>>();
+    const unmatched: string[] = [];
+    for (const a of (Array.isArray(data.answers) ? data.answers : []) as Array<Record<string, unknown>>) {
+      const no = normalizeItemNo(a.item, known);
+      if (no) got.set(no, a);
+      else unmatched.push(String(a.item ?? "").slice(0, 12));
+    }
     await audit("assessment_ocr", {
       pages: images.length, sha256: await Promise.all(images.map(i => sha256(i.bytes))),
-      bytes: images.reduce((s, i) => s + i.bytes.length, 0), items: specs.length, model: cfg.model, usage,
+      bytes: images.reduce((s, i) => s + i.bytes.length, 0), items: specs.length, matched: got.size, unmatched, model: cfg.model, usage,
     });
 
-    const got = new Map(
-      (Array.isArray(data.answers) ? data.answers : []).map((a: Record<string, unknown>) => [String(a.item ?? "").trim(), a]),
-    );
     return Response.json({
       answers: specs.map(s => {
         const a = got.get(s.no) as Record<string, unknown> | undefined;
@@ -53,6 +59,8 @@ export async function POST(request: Request) {
         };
       }),
       usage,
+      matched: got.size,
+      unmatched, // 문항 번호만 (답 내용은 없음) — 번호 형식 문제를 진단할 때 쓴다
     });
   } catch (error) {
     return errorResponse(error);

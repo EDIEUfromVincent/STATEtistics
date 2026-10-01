@@ -2,7 +2,7 @@
 /* eslint-disable @next/next/no-img-element -- 미리보기는 브라우저 메모리의 blob URL이라 next/image를 쓸 수 없다 */
 
 import Link from "next/link";
-import { TEMPLATES } from "../../lib/assessment/images";
+import { LAYOUTS, TEMPLATES } from "../../lib/assessment/images";
 import { useGrading } from "../GradingContext";
 
 export default function PhotosStep() {
@@ -14,12 +14,13 @@ export default function PhotosStep() {
       <header><span>3</span><h3>사진 넣기 · 가림 확인 · 승인</h3><p>스캔 앱으로 찍은 JPG/PNG/PDF를 번호 순서대로, 한 학생의 쪽을 연달아 선택하세요. 이름 칸은 이 브라우저에서 검게 가리고 촬영 정보(EXIF)는 지웁니다.</p></header>
       {!ready && <p className="warn-note">먼저 <Link href="/grading">명부</Link>와 <Link href="/grading/key">정답표</Link>를 준비하세요.</p>}
       <div className="grading-row">
+        <label>스캔 방식<select value={g.layoutId} onChange={e => g.setLayoutId(e.target.value)}>{LAYOUTS.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
         <label>이름 칸 양식<select value={g.templateId} onChange={e => g.setTemplateId(e.target.value)}>{TEMPLATES.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
         <label>학생 1명 쪽수<input type="number" min={1} max={8} value={g.pagesPerStudent} onChange={e => g.setPagesPerStudent(Number(e.target.value))} /></label>
       </div>
       <label className="upload-drop">
         <input type="file" multiple accept="image/jpeg,image/png,.pdf,.heic" disabled={!ready || g.processing} onChange={e => { g.handlePhotos(e.target.files); e.target.value = ""; }} />
-        <b>{g.processing ? "이름 칸 가리는 중…" : "사진·스캔 PDF 선택"}</b>
+        <b>{g.processing ? `이름 칸 가리는 중… ${g.processed ? `${g.processed.done}/${g.processed.total}쪽` : ""}` : "사진·스캔 PDF 선택"}</b>
         <span>{ready ? `응시 ${g.students.length}명 × ${g.pagesPerStudent}쪽 = ${g.students.length * g.pagesPerStudent}쪽이 필요합니다` : "명부와 정답표를 먼저 준비하세요"}</span>
       </label>
       {g.pageError && <div className="model-error">{g.pageError}</div>}

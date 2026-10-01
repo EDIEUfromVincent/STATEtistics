@@ -31,7 +31,7 @@ export default function ResultStep() {
         <div className="kpi"><span>응시</span><strong>{g.students.length}명</strong><small>{g.failedCodes.length ? `판독 실패 ${g.failedCodes.length}명` : "모두 판독됨"}</small></div>
         <div className="kpi"><span>채점 행</span><strong>{r.rows.length}</strong></div>
         <div className="kpi"><span>교사 확인 대기</span><strong>{pending}</strong><small className={pending ? "negative" : ""}>{pending ? "확정 전 문항은 정답률을 계산하지 않습니다" : "모두 확정됨"}</small></div>
-        <div className="kpi"><span>AI 사용 비용</span><strong>{g.demo ? "0원" : formatKrw(costKrw(totalUsage, g.pricing))}</strong><small>{g.demo ? "데모는 전송하지 않음" : "토큰 사용량 기준 추정"}</small></div>
+        <div className="kpi"><span>AI 사용 비용</span><strong>{g.demo ? "0원" : formatKrw(costKrw(totalUsage, g.pricing) + g.cellUsd * g.pricing.usdKrw)}</strong><small>{g.demo ? "데모는 전송하지 않음" : "토큰 사용량 기준 추정"}</small></div>
       </div>
       {failedRows > 0 && <p className="warn-note"><Link href="/grading/ocr">4단계</Link>에서 판독하지 못한 학생 {g.failedCodes.length}명이 남아 있습니다. 이 학생들의 문항은 미확정으로 표시됩니다.</p>}
       {pending > failedRows && <p className="warn-note"><Link href="/grading/review">5단계 교사 확인</Link>에 {pending - failedRows}건이 남아 있습니다. 지금 분석하면 그 문항은 미확정으로 표시됩니다.</p>}

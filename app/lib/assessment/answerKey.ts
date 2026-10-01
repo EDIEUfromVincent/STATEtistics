@@ -23,6 +23,8 @@ export type Item = {
   difficulty: string;
   content: string;
   mappingStatus: string;
+  // 판독 안내: 이 칸이 시험지의 어디인지 (예: "6번 둘째 빈칸", "7번 (동/서/남/북) 중 ○표"). 정답은 적지 않는다
+  hint: string;
   parsed: number[] | string[] | string[][] | null;
 };
 
@@ -73,6 +75,7 @@ export function loadAnswerKey(text: string, name = "정답표"): Item[] {
       difficulty: nfc(r["난이도"]),
       content: nfc(r["평가내용"]),
       mappingStatus: nfc(r["매핑상태"]),
+      hint: nfc(r["판독안내"]),
     });
   });
   if (errors.length) throw new AnswerKeyError(`${name} 오류:\n${errors.join("\n")}`);
@@ -83,7 +86,7 @@ export function pageCount(items: Item[]) {
   return Math.max(0, ...items.flatMap(it => it.pages));
 }
 
-/** OCR 요청용 문항 정보. 정답은 절대 넣지 않는다. */
+/** OCR 요청용 문항 정보. 정답은 절대 넣지 않는다 (판독 안내는 칸의 위치만 알려 준다). */
 export function ocrSpec(it: Item) {
-  return { no: it.no, kind: it.kind, choices: it.choices, ox: it.kind === "OX" ? (it.parsed as string[]).length : 0 };
+  return { no: it.no, kind: it.kind, choices: it.choices, ox: it.kind === "OX" ? (it.parsed as string[]).length : 0, hint: it.hint };
 }

@@ -9,7 +9,8 @@ export const LONG_COLUMNS = [
 ] as const;
 export type LongRow = Record<(typeof LONG_COLUMNS)[number], string>;
 
-export type Reading = { answer: string; confidence: number; nameHits: number };
+// note: 교사 확인으로 보낸 이유 (예: 두 판독이 다름). 칸 판독에서만 채운다
+export type Reading = { answer: string; confidence: number; nameHits: number; note?: string };
 export type Readings = Record<string, Record<string, Reading>>; // 학생코드 → 문항 → 판독
 
 export type ReadReview = { confirmed?: boolean; fixed?: string };
@@ -17,6 +18,8 @@ export type EssayReview = { final?: number | null; aiScore?: number | null; aiEv
 export const reviewKey = (code: string, no: string) => `${code}|${no}`;
 
 export const READ_FAILED = "판독실패";
+// 교사가 "빈칸으로 고치기"를 누르면 수정값에 이 표시를 넣는다 (수정값이 비어 있으면 "고치지 않음"이라서)
+export const BLANK_FIX = "(빈칸)";
 
 export type BuildOptions = {
   assessmentId: string;
@@ -65,13 +68,14 @@ export function buildRows(items: Item[], readings: Readings, options: BuildOptio
       let answer = reading.answer;
       const flags: string[] = [];
       // 빈칸으로 읽혔어도 확신이 낮으면 교사에게 묻는다 (흐린 글씨가 0점이 되지 않게)
-      const uncertain = it.kind !== "서술" && (options.reviewAll || reading.confidence < low);
+      // 서술형은 점수를 교사가 정하므로 판독 확인에서 빼되, 빈칸으로 읽혔는데 불확실하면 판독 확인에 올린다
+      const uncertain = (it.kind !== "서술" || !reading.answer) && (options.reviewAll ? it.kind !== "서술" : reading.confidence < low);
       const fixed = review.fixed?.trim() ?? "";
       if (uncertain || fixed || review.confirmed) {
         readQueue.push({ code, no: it.no, answer: reading.answer, confidence: reading.confidence, reviewed: Boolean(fixed || review.confirmed) });
       }
       if (fixed) {
-        answer = fixed;
+        answer = fixed === BLANK_FIX ? "" : fixed;
         flags.push("판독수정");
       } else if (review.confirmed) {
         flags.push("판독확인");
