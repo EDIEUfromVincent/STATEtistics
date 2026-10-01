@@ -1,4 +1,4 @@
-import { AuthError, requireTeacher, teacherKeys, type TeacherKeys } from "../../lib/server/auth";
+import { AuthError, requireTeacher, teacherKeys, type TeacherKeys } from "../../lib/server/auth.ts";
 
 // 채점용 Gemini 중계. 요청한 선생님(구글 로그인)의 API 키로 부른다. 서버가 받는 것은 이름 칸을 가린 페이지 이미지와 이름을 가린 서술형 텍스트뿐이다.
 // 이미지·텍스트는 저장하지 않고, 로그에는 해시와 크기만 남긴다.
