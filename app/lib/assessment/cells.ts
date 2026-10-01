@@ -390,6 +390,21 @@ export function grayFromRgba(data: Uint8ClampedArray, w: number, h: number): Gra
   return { w, h, d };
 }
 
+/** 캔버스·이미지를 긴 변 maxSide 이하로 줄여 흑백으로 (스캔 방식 판별용) */
+export function grayFromImage(image: CanvasImageSource & { width: number; height: number }, maxSide = 800): Gray {
+  const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, Math.round(image.width * scale));
+  c.height = Math.max(1, Math.round(image.height * scale));
+  const ctx = c.getContext("2d", { willReadFrequently: true })!;
+  ctx.fillStyle = "white";
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(image, 0, 0, c.width, c.height);
+  const g = grayFromRgba(ctx.getImageData(0, 0, c.width, c.height).data, c.width, c.height);
+  c.width = c.height = 0;
+  return g;
+}
+
 export async function grayFromBlob(blob: Blob): Promise<Gray> {
   const bmp = await createImageBitmap(blob);
   const c = document.createElement("canvas");

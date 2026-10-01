@@ -5,7 +5,7 @@ import Link from "next/link";
 import { LAYOUTS, TEMPLATES } from "../../lib/assessment/images";
 import { studentLabel } from "../../lib/assessment/privacy";
 import { DropZone } from "../DropZone";
-import { useGrading } from "../GradingContext";
+import { AUTO_LAYOUT, useGrading } from "../GradingContext";
 
 export default function PhotosStep() {
   const g = useGrading();
@@ -15,11 +15,18 @@ export default function PhotosStep() {
     <section className="grading-card">
       <header><span>3</span><h3>학생 답안 넣기 · 가림 확인 · 승인</h3><p>스캔 앱으로 찍은 JPG/PNG/PDF를 번호 순서대로, 한 학생의 쪽을 연달아 선택하세요. 이름 칸은 이 브라우저에서 검게 가리고 촬영 정보(EXIF)는 지웁니다.</p></header>
       {!ready && <p className="warn-note">먼저 <Link href="/grading">학생 번호</Link>와 <Link href="/grading/key">시험지</Link>를 준비하세요.</p>}
-      <div className="grading-row">
-        <label>스캔 방식<select value={g.layoutId} onChange={e => g.setLayoutId(e.target.value)}>{LAYOUTS.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
-        <label>이름 칸 양식<select value={g.templateId} onChange={e => g.setTemplateId(e.target.value)}>{TEMPLATES.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
-        <label>학생 1명 쪽수<input type="number" min={1} max={8} value={g.pagesPerStudent} onChange={e => g.setPagesPerStudent(Number(e.target.value))} /></label>
-      </div>
+      <details className="advanced scan-options">
+        <summary>{`스캔 방식: ${g.layoutId === AUTO_LAYOUT ? `자동${g.detectedLayout ? ` → ${LAYOUTS.find(l => l.id === g.detectedLayout)?.name ?? ""}` : " (넣으면 빈 시험지와 비교해 알아서 정합니다)"}` : `직접 고름 → ${LAYOUTS.find(l => l.id === g.layoutId)?.name ?? ""}`} · 학생 1명 ${g.pagesPerStudent}쪽 — 자동이 틀렸을 때만 바꾸세요`}</summary>
+        <p className="helper-line">바꾸면 이미 넣은 스캔 파일로 바로 다시 처리합니다. 학생 번호와 시험지는 그대로 둡니다.</p>
+        <div className="grading-row">
+          <label>스캔 방식<select value={g.layoutId} onChange={e => g.setLayoutId(e.target.value)}>
+            <option value={AUTO_LAYOUT}>자동 (추천)</option>
+            {LAYOUTS.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </select></label>
+          <label>이름 칸 가리기<select value={g.templateId} onChange={e => g.setTemplateId(e.target.value)}>{TEMPLATES.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+          <label>학생 1명 쪽수<input type="number" min={1} max={8} value={g.pagesPerStudent} onChange={e => g.setPagesPerStudent(Number(e.target.value))} /></label>
+        </div>
+      </details>
       <DropZone accept="image/jpeg,image/png,.pdf,.heic" multiple disabled={!ready || g.processing} onFiles={files => g.handlePhotos(files)}
         title={g.processing ? `이름 칸 가리는 중… ${g.processed ? `${g.processed.done}/${g.processed.total}쪽` : ""}` : ready ? "학생 답안 스캔 PDF(또는 사진)를 여기에 끌어다 놓거나 눌러서 고르세요" : "학생 번호와 시험지를 먼저 준비하세요"}>
         {ready ? `응시 ${g.students.length}명 × ${g.pagesPerStudent}쪽 = ${g.students.length * g.pagesPerStudent}쪽이 필요합니다 · 이름 칸은 이 브라우저에서 검게 가립니다` : ""}

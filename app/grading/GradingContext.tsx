@@ -8,12 +8,12 @@ import { AnswerKeyError, loadAnswerKey, ocrSpec, pageCount, type Item } from "..
 import { addUsage, DEFAULT_PRICING, ZERO_USAGE, type Pricing, type Usage } from "../lib/assessment/cost";
 import { toCsv } from "../lib/assessment/csv";
 import { estimateShifts } from "../lib/assessment/align";
-import { blankLike, cellPair, cropByRegistration, FAINT, headerNumberBox, register, toPx, strokesOnly, fitForReading, grayFromBlob, grayToPng, ink, matchQuality, pickByInk, preparePage, regionPair, renderBlankPage, type Gray, type PreparedPage } from "../lib/assessment/cells";
+import { blankLike, cellPair, cropByRegistration, FAINT, grayFromImage, headerNumberBox, register, toPx, strokesOnly, fitForReading, grayFromBlob, grayToPng, ink, matchQuality, pickByInk, preparePage, regionPair, renderBlankPage, type Gray, type PreparedPage } from "../lib/assessment/cells";
 import { decide, SURE, UNSURE } from "../lib/assessment/decide";
 import { gradeItem } from "../lib/assessment/grade";
 import { FormError, parseForm, type FormLayout } from "../lib/assessment/form";
 import { formFromPdf, readPdfPages } from "../lib/assessment/pdfForm";
-import { applyLayout, blobToBase64, demoPage, LAYOUTS, openPages, processPage, processStaged, stagePage, TEMPLATES, type ProcessedPage } from "../lib/assessment/images";
+import { applyLayout, blobToBase64, demoPage, LAYOUTS, openPages, processPage, processStaged, stagePage, TEMPLATES, type ProcessedPage, type Template } from "../lib/assessment/images";
 import { createRoster, maskNames, matchGroups, numberRoster, parseNumberList, parseRoster, present, sha256Hex, studentLabel, type Student } from "../lib/assessment/privacy";
 import { buildRows, LONG_COLUMNS, reviewKey, type BuildResult, type EssayReview, type Reading, type Readings, type ReadReview } from "../lib/assessment/records";
 import { SAMPLE_KEY_CSV, SAMPLE_KEY_NAME } from "../lib/assessment/sampleKey";
@@ -29,6 +29,15 @@ export type Health = {
 export type DraftRow = { 문항: string; 유형: string; 정답: string; 배점: number; 보기수?: number; 채점기준?: string; 행동영역?: string; 성취기준: string; 판독안내: string; 확신: string; 근거: string };
 export type Draft = { fileName: string; layout: FormLayout; rows: DraftRow[]; usd: number };
 export const DRAFT_COLUMNS = ["문항", "유형", "정답", "배점", "보기수", "채점기준", "행동영역", "난이도", "성취기준", "평가내용", "매핑상태", "판독안내"];
+
+export const AUTO_LAYOUT = "auto";
+const SETUP_KEY = "statetistic:setup";
+const BLANK_KEY = "statetistic:blankPdf";
+const BLANK_NAME_KEY = "statetistic:blankPdfName";
+type SavedSetup = {
+  className: string; studentCount: string; absentText: string; roster: Array<{ number: number; code: string; absent: boolean }>;
+  keyCsv: string; keyName: string; formJson: string; formName: string; assessmentId: string; source: string; pagesPerStudent: number; templateId: string;
+};
 
 export type ScanGroup = { group: number; crop: string; read: number | null; code: string; problem: string; auto: boolean };
 
@@ -46,7 +55,7 @@ type GradingState = {
   keyName: string; items: Item[]; keyError: string; applyKey: (text: string, name: string) => boolean;
   assessmentId: string; setAssessmentId: (v: string) => void; source: string; setSource: (v: string) => void;
   templateId: string; setTemplateId: (v: string) => void; pagesPerStudent: number; setPagesPerStudent: (v: number) => void;
-  layoutId: string; setLayoutId: (v: string) => void; processed: { done: number; total: number } | null;
+  layoutId: string; setLayoutId: (v: string) => void; detectedLayout: string; processed: { done: number; total: number } | null;
   students: Student[]; names: string[];
   pages: ProcessedPage[]; pagesByCode: Map<string, ProcessedPage[]>; identity: Record<string, string>; pageError: string; processing: boolean;
   checked: boolean; setChecked: (v: boolean) => void; approved: boolean;
@@ -89,13 +98,17 @@ export function GradingProvider({ children }: { children: ReactNode }) {
   const [rosterError, setRosterError] = useState("");
 
   const [keyName, setKeyName] = useState("");
+  const [keyCsv, setKeyCsv] = useState("");
   const [items, setItems] = useState<Item[]>([]);
   const [keyError, setKeyError] = useState("");
   const [assessmentId, setAssessmentId] = useState("");
   const [source, setSource] = useState("");
   const [templateId, setTemplateIdState] = useState(TEMPLATES[0].id);
   const [pagesPerStudent, setPagesPerStudentState] = useState(1);
-  const [layoutId, setLayoutIdState] = useState(LAYOUTS[0].id);
+  // 스캔 방식: 기본은 자동(빈 시험지와 가장 잘 겹치는 방식). 직접 고르면 그 방식
+  const [layoutId, setLayoutIdState] = useState(AUTO_LAYOUT);
+  const [detectedLayout, setDetectedLayout] = useState("");
+  const lastScans = useRef<File[]>([]);
   const [processed, setProcessed] = useState<{ done: number; total: number } | null>(null);
 
   const [pages, setPages] = useState<ProcessedPage[]>([]);
@@ -140,6 +153,59 @@ export function GradingProvider({ children }: { children: ReactNode }) {
     return () => held.forEach(u => URL.revokeObjectURL(u));
   }, []);
 
+  // ---- 준비한 것 유지: 새로고침해도 학생 번호·시험지(정답표·칸 양식·빈 시험지)가 남는다 ----
+  // 이 탭의 sessionStorage에만 두고 탭을 닫으면 지워진다. 이름은 저장하지 않는다.
+  const restored = useRef(false);
+  function restoreSetup() {
+    try {
+      const raw = sessionStorage.getItem(SETUP_KEY);
+      if (raw) {
+        const v = JSON.parse(raw) as SavedSetup;
+        setClassName(v.className ?? ""); setStudentCount(v.studentCount ?? ""); setAbsentText(v.absentText ?? "");
+        setRoster((v.roster ?? []).map(r => ({ ...r, name: "" })));
+        setAssessmentId(v.assessmentId ?? ""); setSource(v.source ?? "");
+        if (v.templateId) setTemplateIdState(v.templateId);
+        if (v.pagesPerStudent) setPagesPerStudentState(v.pagesPerStudent);
+        if (v.keyCsv) {
+          const loaded = loadAnswerKey(v.keyCsv, v.keyName ?? "정답표");
+          setItems(loaded); setKeyCsv(v.keyCsv); setKeyName(v.keyName ?? "");
+          if (v.formJson) { setForm(parseForm(v.formJson, loaded.map(i => i.no))); setFormName(v.formName ?? ""); }
+        }
+      }
+      const pdf = sessionStorage.getItem(BLANK_KEY);
+      const pdfName = sessionStorage.getItem(BLANK_NAME_KEY);
+      if (pdf && pdfName) setBlankPdf(new File([Uint8Array.from(atob(pdf), c => c.charCodeAt(0))], pdfName, { type: "application/pdf" }));
+    } catch {
+      // 깨진 저장값은 버린다
+      sessionStorage.removeItem(SETUP_KEY);
+    }
+    restored.current = true;
+  }
+  // 브라우저 저장소(외부)에서 되살리는 일이라 첫 그리기 뒤에 한 번만 한다. 처음부터 상태에 넣으면 서버가 그린 화면과 어긋난다
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => restoreSetup(), []);
+  useEffect(() => {
+    if (!restored.current || demo) return;
+    const v: SavedSetup = {
+      className, studentCount, absentText, roster: roster.map(({ number, code, absent }) => ({ number, code, absent })),
+      keyCsv, keyName, formJson: form ? JSON.stringify(form) : "", formName, assessmentId, source, pagesPerStudent, templateId,
+    };
+    try { sessionStorage.setItem(SETUP_KEY, JSON.stringify(v)); } catch { /* 저장 공간이 부족하면 유지만 포기한다 */ }
+  }, [className, studentCount, absentText, roster, keyCsv, keyName, form, formName, assessmentId, source, pagesPerStudent, templateId, demo]);
+  useEffect(() => {
+    if (!restored.current) return;
+    if (!blankPdf) { sessionStorage.removeItem(BLANK_KEY); sessionStorage.removeItem(BLANK_NAME_KEY); return; }
+    void blankPdf.arrayBuffer().then(buf => {
+      try {
+        const bytes = new Uint8Array(buf);
+        let bin = "";
+        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        sessionStorage.setItem(BLANK_KEY, btoa(bin));
+        sessionStorage.setItem(BLANK_NAME_KEY, blankPdf.name);
+      } catch { /* 큰 PDF는 저장하지 못할 수 있다 — 새로고침하면 다시 넣어야 한다 */ }
+    });
+  }, [blankPdf]);
+
   const hasWork = pages.length > 0 || Object.keys(readings).length > 0;
   useEffect(() => {
     if (!hasWork) return;
@@ -148,7 +214,6 @@ export function GradingProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("beforeunload", warn);
   }, [hasWork]);
 
-  const template = TEMPLATES.find(t => t.id === templateId) ?? TEMPLATES[0];
   const students = useMemo(() => present(roster), [roster]);
   const names = useMemo(() => [...new Set([...roster.map(s => s.name), ...namesText.split(/\r?\n/)].map(n => n.trim()).filter(Boolean))], [roster, namesText]);
   const label = (code: string) => {
@@ -241,6 +306,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
       const loaded = loadAnswerKey(text, name);
       if (!confirmReset("정답표를 바꿉니다.")) return false;
       setItems(loaded);
+      setKeyCsv(text);
       setKeyName(name);
       setKeyError("");
       setPagesPerStudentState(Math.max(1, pageCount(loaded)));
@@ -336,6 +402,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
       const layout = parseForm(JSON.stringify(draft.layout), loaded.map(i => i.no));
       if (!confirmReset("이 정답표로 확정합니다.")) return false;
       setItems(loaded);
+      setKeyCsv(csv);
       setKeyName(`${draft.fileName} (PDF에서 만듦)`);
       setKeyError("");
       setForm(layout);
@@ -344,6 +411,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
       blankCache.current.clear();
       setBlankPdf(draftFile.current);
       setPagesPerStudentState(layout.pages);
+      setTemplateIdState("top-band"); // 1쪽 맨 위 머리글 띠 + 모든 쪽 위 여백을 가린다
       if (!assessmentId) setAssessmentId(draft.fileName.replace(/\.pdf$/i, ""));
       resetPages();
       setDraftError("");
@@ -356,38 +424,84 @@ export function GradingProvider({ children }: { children: ReactNode }) {
   }
 
   function setTemplateId(v: string) {
-    if (!confirmReset("이름 칸 양식을 바꿉니다.")) return;
+    if (Object.keys(readings).length && !confirm("이름 칸 가리기를 바꾸면 판독 결과와 교사 확인이 지워집니다. 계속할까요?")) return;
     setTemplateIdState(v);
-    resetPages();
+    if (lastScans.current.length) void handlePhotos(lastScans.current, { template: v, again: true });
+    else resetPages();
   }
 
+  /** 스캔 방식을 바꾸면 이미 넣은 스캔 파일로 바로 다시 처리한다 (학생 번호·시험지는 그대로) */
   function setLayoutId(v: string) {
-    if (!confirmReset("스캔 방식을 바꿉니다.")) return;
+    if (Object.keys(readings).length && !confirm("스캔 방식을 바꾸면 판독 결과와 교사 확인이 지워집니다. 계속할까요?")) return;
     setLayoutIdState(v);
-    resetPages();
+    if (lastScans.current.length) void handlePhotos(lastScans.current, { layout: v, again: true });
+    else resetPages();
+  }
+
+  /** 첫 스캔 장을 방식마다 돌리고 나눠 빈 시험지 1쪽과 가장 잘 겹치는 방식을 고른다. 빈 시험지가 없으면 가로·세로로 짐작 */
+  async function detectLayout(list: File[]) {
+    const opened = await openPages(list, 2);
+    try {
+      const first = opened.pages[0];
+      if (!first) return LAYOUTS[0].id;
+      const image = await first.load();
+      try {
+        if (!blankPdf) return image.width > image.height ? "2up-landscape" : "single";
+        let best = { id: LAYOUTS[0].id, score: -1 };
+        for (const l of LAYOUTS) {
+          const part = applyLayout(image, l)[0];
+          const g = grayFromImage(part, 800);
+          part.width = part.height = 0;
+          const blank = await renderBlankPage(blankPdf, 0, g.w, g.h);
+          const score = register(g, blank).score;
+          if (score > best.score) best = { id: l.id, score };
+        }
+        return best.id;
+      } finally {
+        if ("close" in image) image.close();
+        else image.width = image.height = 0;
+      }
+    } finally {
+      await opened.close();
+    }
   }
 
   function setPagesPerStudent(v: number) {
-    if (!confirmReset("학생 1명 쪽수를 바꿉니다.")) return;
-    setPagesPerStudentState(Math.max(1, Math.min(8, v || 1)));
-    resetPages();
+    if (Object.keys(readings).length && !confirm("쪽수를 바꾸면 판독 결과와 교사 확인이 지워집니다. 계속할까요?")) return;
+    const n = Math.max(1, Math.min(8, v || 1));
+    setPagesPerStudentState(n);
+    if (lastScans.current.length) void handlePhotos(lastScans.current, { pages: n, again: true });
+    else resetPages();
   }
 
+
   // ---- 3. 사진 → 가림 ------------------------------------------------------
-  async function handlePhotos(files: FileList | null) {
-    if (!files?.length || !confirmReset("사진을 새로 넣습니다.")) return;
+  async function handlePhotos(files: FileList | File[] | null, opts: { layout?: string; again?: boolean; template?: string; pages?: number } = {}) {
+    if (!files?.length) return;
+    if (!opts.again && !confirmReset("사진을 새로 넣습니다.")) return;
+    const list = [...files];
+    // 설정을 바꾸며 다시 처리할 때는 바뀐 값을 바로 쓴다 (상태는 다음 그리기에서야 바뀐다)
+    const tpl = TEMPLATES.find(t => t.id === (opts.template ?? templateId)) ?? TEMPLATES[0];
+    const pps = opts.pages ?? pagesPerStudent;
+    lastScans.current = list;
     resetPages();
     setDemo(false);
     setProcessing(true);
     setPageError("");
-    const layout = LAYOUTS.find(l => l.id === layoutId) ?? LAYOUTS[0];
     let close = async () => {};
     try {
-      const opened = await openPages([...files], layout.split);
+      let chosen = opts.layout ?? layoutId;
+      if (chosen === AUTO_LAYOUT) {
+        setProcessed(null);
+        chosen = await detectLayout(list);
+      }
+      setDetectedLayout(chosen);
+      const layout = LAYOUTS.find(l => l.id === chosen) ?? LAYOUTS[0];
+      const opened = await openPages(list, layout.split);
       close = opened.close;
       const have = opened.pages.length * layout.split;
-      if (have % pagesPerStudent) throw new Error(`쪽 수가 맞지 않습니다: 스캔 ${opened.pages.length}장${layout.split === 2 ? " × 2쪽(모아 찍기)" : ""} = ${have}쪽은 학생 1명 ${pagesPerStudent}쪽으로 나누어떨어지지 않습니다. 스캔 방식과 학생 1명 쪽수를 확인하세요.`);
-      const groupCount = have / pagesPerStudent;
+      if (have % pps) throw new Error(`쪽 수가 맞지 않습니다: 스캔 ${opened.pages.length}장${layout.split === 2 ? " × 2쪽(모아 찍기)" : ""} = ${have}쪽은 학생 1명 ${pps}쪽으로 나누어떨어지지 않습니다. 스캔 방식과 학생 1명 쪽수를 확인하세요.`);
+      const groupCount = have / pps;
       // 빈 시험지와 접속 코드가 있으면 1쪽 머리글의 "반·번호"를 읽어 학생을 맞춘다 (스캔 순서와 상관없음)
       const numberBox = blankPdf ? await headerNumberBox(blankPdf).catch(() => null) : null;
       const byNumber = Boolean(numberBox && accessKey && !demo);
@@ -402,7 +516,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
       for (const src of opened.pages) {
         const image = await src.load();
         for (const part of applyLayout(image, layout)) {
-          staged.push({ group: Math.floor(k / pagesPerStudent), page: (k % pagesPerStudent) + 1, source: src.source, ...(await stagePage({ source: src.source, index: src.index, image: part })) });
+          staged.push({ group: Math.floor(k / pps), page: (k % pps) + 1, source: src.source, ...(await stagePage({ source: src.source, index: src.index, image: part })) });
           k++;
           part.width = part.height = 0; // 캔버스 메모리를 바로 돌려준다
         }
@@ -452,12 +566,12 @@ export function GradingProvider({ children }: { children: ReactNode }) {
       const groupCode = (g: number) => codes[g] ?? `미정${g + 1}`;
       // 쪽 번호마다 반 전체와 비교해 밀린 만큼 가림 띠를 늘린다 (줄이지는 않는다)
       const out: ProcessedPage[] = [];
-      for (let pageNo = 1; pageNo <= pagesPerStudent; pageNo++) {
+      for (let pageNo = 1; pageNo <= pps; pageNo++) {
         const group = staged.filter(st => st.page === pageNo);
         const shifts = estimateShifts(group.map(st => st.profile));
         for (let i = 0; i < group.length; i++) {
           const st = group[i];
-          const result = await processStaged(st.blob, st.source, groupCode(st.group), pageNo, template, shifts[i]);
+          const result = await processStaged(st.blob, st.source, groupCode(st.group), pageNo, tpl, shifts[i]);
           out.push(result.processed);
           urls.current.push(result.processed.url);
         }
@@ -496,7 +610,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
     setChecked(false);
   }
 
-  async function processAll(images: Array<ImageBitmap | HTMLCanvasElement>, sources: string[], act: Student[], perStudent: number, tpl: typeof template) {
+  async function processAll(images: Array<ImageBitmap | HTMLCanvasElement>, sources: string[], act: Student[], perStudent: number, tpl: Template) {
     const out: ProcessedPage[] = [];
     const ids: Record<string, string> = {};
     for (let si = 0; si < act.length; si++) {
@@ -867,7 +981,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
     namesText, setNamesText, roster, rosterError, makeRoster, loadRosterFile, toggleAbsent,
     className, setClassName, studentCount, setStudentCount, absentText, setAbsentText, label,
     keyName, items, keyError, applyKey, assessmentId, setAssessmentId, source, setSource,
-    templateId, setTemplateId, pagesPerStudent, setPagesPerStudent, layoutId, setLayoutId, processed, students, names,
+    templateId, setTemplateId, pagesPerStudent, setPagesPerStudent, layoutId, setLayoutId, detectedLayout, processed, students, names,
     pages, pagesByCode, identity, pageError, processing, checked, setChecked, approved: approvedHashes != null,
     handlePhotos, approve, groups, assignGroup, demo, startDemo, readings, failedCodes, progress, runOcr, ocrUsage,
     reviewAll, setReviewAll, readReview, setReadReview, essayReview, setEssayReview,
