@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
+import { GradingProvider } from "./grading/GradingContext";
 import "./globals.css";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -20,5 +21,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="ko"><body>{children}</body></html>;
+  // 채점 상태는 앱 전체에 둔다: 분석 화면에 다녀와도 판독·교사 점수가 남아 서술형 등을 다시 고칠 수 있다.
+  // 여전히 이 탭의 메모리에만 있고, 새로고침하거나 탭을 닫으면 사라진다.
+  return <html lang="ko"><body><GradingProvider>{children}</GradingProvider></body></html>;
 }

@@ -13,7 +13,7 @@ export default function ResultStep() {
   const router = useRouter();
   const r = g.result;
   if (!r) {
-    return <section className="grading-card"><header><span>6</span><h3>결과</h3></header><p className="warn-note">아직 결과가 없습니다. <Link href="/grading/ocr">4단계 판독</Link>을 먼저 실행하세요.</p></section>;
+    return <section className="grading-card"><header><span>7</span><h3>결과</h3></header><p className="warn-note">아직 결과가 없습니다. <Link href="/grading/ocr">4단계 판독</Link>을 먼저 실행하세요.</p></section>;
   }
   const pending = pendingCount(r.rows);
   const failedRows = r.rows.filter(x => x.채점방식 === READ_FAILED).length;
@@ -26,7 +26,7 @@ export default function ResultStep() {
 
   return (
     <section className="grading-card">
-      <header><span>6</span><h3>결과</h3><p>결과에는 학생 코드만 들어갑니다. 이름으로 되돌릴 때는 보관한 명부 파일을 씁니다.</p></header>
+      <header><span>7</span><h3>결과</h3><p>결과에는 학생 코드만 들어갑니다. 이름으로 되돌릴 때는 보관한 명부 파일을 씁니다.</p></header>
       <div className="kpi-grid">
         <div className="kpi"><span>응시</span><strong>{g.students.length}명</strong><small>{g.failedCodes.length ? `판독 실패 ${g.failedCodes.length}명` : "모두 판독됨"}</small></div>
         <div className="kpi"><span>채점 행</span><strong>{r.rows.length}</strong></div>
@@ -34,7 +34,8 @@ export default function ResultStep() {
         <div className="kpi"><span>AI 사용 비용</span><strong>{g.demo ? "0원" : formatKrw(costKrw(totalUsage, g.pricing) + g.cellUsd * g.pricing.usdKrw)}</strong><small>{g.demo ? "데모는 전송하지 않음" : "토큰 사용량 기준 추정"}</small></div>
       </div>
       {failedRows > 0 && <p className="warn-note"><Link href="/grading/ocr">4단계</Link>에서 판독하지 못한 학생 {g.failedCodes.length}명이 남아 있습니다. 이 학생들의 문항은 미확정으로 표시됩니다.</p>}
-      {pending > failedRows && <p className="warn-note"><Link href="/grading/review">5단계 교사 확인</Link>에 {pending - failedRows}건이 남아 있습니다. 지금 분석하면 그 문항은 미확정으로 표시됩니다.</p>}
+      {pending > failedRows && <p className="warn-note"><Link href="/grading/review">5단계 판독 확인</Link>과 <Link href="/grading/essay">6단계 서술형 채점</Link>에 {pending - failedRows}건이 남아 있습니다. 지금 분석하면 그 문항은 미확정으로 표시됩니다.</p>}
+      {r.essayQueue.length > 0 && <p className="helper-line">서술형 점수를 바꾸고 싶으면 <Link href="/grading/essay">서술형 채점</Link>으로 돌아가 고친 뒤, 아래 &quot;이 결과로 분석하기&quot;를 다시 누르세요.</p>}
       <div className="grading-actions">
         <button className="primary-action" onClick={analyze}>이 결과로 분석하기 →</button>
         <button className="secondary-action" onClick={() => downloadBlob(`﻿${g.resultCsv()}`, `${g.assessmentId || "평가"}_응답_long.csv`, "text/csv")}>응답_long.csv 내려받기</button>

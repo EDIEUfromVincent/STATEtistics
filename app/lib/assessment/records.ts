@@ -71,7 +71,7 @@ export function buildRows(items: Item[], readings: Readings, options: BuildOptio
       // 서술형은 점수를 교사가 정하므로 판독 확인에서 빼되, 빈칸으로 읽혔는데 불확실하면 판독 확인에 올린다
       const uncertain = (it.kind !== "서술" || !reading.answer) && (options.reviewAll ? it.kind !== "서술" : reading.confidence < low);
       const fixed = review.fixed?.trim() ?? "";
-      if (uncertain || fixed || review.confirmed) {
+      if (uncertain || ((fixed || review.confirmed) && it.kind !== "서술")) {
         readQueue.push({ code, no: it.no, answer: reading.answer, confidence: reading.confidence, reviewed: Boolean(fixed || review.confirmed) });
       }
       if (fixed) {

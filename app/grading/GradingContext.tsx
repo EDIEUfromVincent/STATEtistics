@@ -57,7 +57,7 @@ const Ctx = createContext<GradingState | null>(null);
 
 export function useGrading() {
   const ctx = useContext(Ctx);
-  if (!ctx) throw new Error("useGrading은 /grading 아래에서만 쓸 수 있습니다");
+  if (!ctx) throw new Error("useGrading은 GradingProvider(앱 루트) 안에서만 쓸 수 있습니다");
   return ctx;
 }
 

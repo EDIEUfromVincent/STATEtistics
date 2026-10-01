@@ -306,3 +306,16 @@ test("교사 확인 이유와 잰 정확도", () => {
   assert.match(accuracyLabel("marks"), /표본 적음/);
   assert.equal(accuracyLabel("form"), "측정 전");
 });
+
+test("서술형: 옮겨 적은 글을 고쳐도 판독 확인 목록에 오르지 않고, 교사 점수가 있어야 확정된다", () => {
+  const readings = { A1B: { L3: { answer: "자전축이 기울어져서", confidence: 1, nameHits: 0 } } };
+  const base = { assessmentId: "t", source: "", readReview: { "A1B|L3": { fixed: "자전축이 기울어진 채 공전해서" } } };
+  const pending = buildRows(KEY6, readings, base);
+  assert.equal(pending.readQueue.filter(q => q.no === "L3").length, 0);
+  assert.equal(pending.essayQueue[0].answer, "자전축이 기울어진 채 공전해서");
+  assert.equal(pending.rows.find(r => r.문항 === "L3")!.정오, "");
+  const scored = buildRows(KEY6, readings, { ...base, essayReview: { "A1B|L3": { final: 1.5 } } });
+  const row = scored.rows.find(r => r.문항 === "L3")!;
+  assert.equal(row.점수, "1.5");
+  assert.equal(row.채점방식, "교사확정");
+});
