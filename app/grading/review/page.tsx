@@ -7,10 +7,12 @@ import { accuracyLabel, reasonOf } from "../../lib/assessment/confidence";
 import { gradeItem } from "../../lib/assessment/grade";
 import { BLANK_FIX, reviewKey } from "../../lib/assessment/records";
 import { useGrading } from "../GradingContext";
+import { PageFocus } from "../PageFocus";
 
 export default function ReviewStep() {
   const g = useGrading();
-  const [viewing, setViewing] = useState<string>("");
+  // 원래 시험지 보기: null = 첫 줄을 자동으로, "" = 닫음, 그 밖 = 고른 칸(학생코드|문항)
+  const [picked, setPicked] = useState<string | null>(null);
   const [zoom, setZoom] = useState<{ src: string; label: string } | null>(null);
   const r = g.result;
   if (!r) {
@@ -19,7 +21,9 @@ export default function ReviewStep() {
   const remaining = r.readQueue.filter(q => !q.reviewed).length;
   const fixedCount = r.readQueue.filter(q => g.readReview[reviewKey(q.code, q.no)]?.fixed?.trim()).length;
   const reviewedCount = r.readQueue.length - remaining;
-  const viewPages = viewing ? g.pagesByCode.get(viewing) ?? [] : [];
+  const focus = picked ?? (r?.readQueue[0] ? reviewKey(r.readQueue[0].code, r.readQueue[0].no) : "") ?? "";
+  const focusCode = focus.split("|")[0];
+  const focusNo = focus.split("|")[1] ?? "";
 
   return (
     <>
@@ -35,7 +39,7 @@ export default function ReviewStep() {
           {g.reviewAll && reviewedCount > 0 && <b> 지금까지 {reviewedCount}건 대조, {fixedCount}건 수정 → 오판독률 {Math.round((fixedCount / reviewedCount) * 100)}%</b>}
         </p>
         <h4>{r.readQueue.length}건 중 {remaining}건 남음</h4>
-        <div className={viewing ? "review-split" : ""}>
+        <div className={focus ? "review-split" : ""}>
           {r.readQueue.length === 0 ? <p className="helper-line">확인할 판독이 없습니다.</p> :
             <div className="table-scroll small-table"><table><thead><tr><th>학생</th><th>문항</th>{g.useCells && <th>학생 칸</th>}<th>AI 판독</th><th>{g.useCells ? "AI 정확도 · 이유" : "신뢰도"}</th><th>바로잡기</th><th>채점</th></tr></thead><tbody>
               {r.readQueue.map(q => {
@@ -49,15 +53,15 @@ export default function ReviewStep() {
                 const finalAnswer = fixed ? (fixed === BLANK_FIX ? "" : fixed) : q.answer;
                 const graded = item ? gradeItem(item, finalAnswer) : null;
                 const set = (v: { confirmed?: boolean; fixed?: string }) => g.setReadReview(all => ({ ...all, [k]: { ...all[k], ...v } }));
-                return <tr key={k} className={q.reviewed ? "reviewed-row" : ""}>
-                  <td><button className={`link-button ${viewing === q.code ? "on" : ""}`} onClick={() => setViewing(v => (v === q.code ? "" : q.code))}>{q.code}</button></td>
+                return <tr key={k} className={`${q.reviewed ? "reviewed-row" : ""} ${focus === k ? "focused-row" : ""}`} onClick={() => setPicked(k)}>
+                  <td><button className={`link-button ${focus === k ? "on" : ""}`} onClick={() => setPicked(k)}>{q.code}</button></td>
                   <td>{q.no}</td>
                   {g.useCells && <td>{info?.crop
                     ? <button className="crop-button" onClick={() => setZoom({ src: info.crop, label: `${q.code} · ${q.no}번` })}><img className="cell-crop" src={info.crop} alt={`${q.code} ${q.no} 칸`} /></button>
                     : <small>시험지 보기</small>}</td>}
                   <td>{q.answer || <small>(빈칸)</small>}{info && info.b != null && info.b !== info.a && <small className="reading-pair">확인 판독: {info.b || "(빈칸)"}</small>}</td>
                   <td>{g.useCells
-                    ? <><b className="accuracy">{accuracyLabel(reasonOf(note, q.confidence >= 0.7))}</b><small className="reading-pair">{note || "자동 확정"}</small></>
+                    ? (() => { const full = accuracyLabel(reasonOf(note, q.confidence >= 0.7)); return <><b className="accuracy" title={full}>{full.split(" (")[0]}</b><small className="reading-pair">{note || "자동 확정"}</small></>; })()
                     : q.confidence}</td>
                   <td className="fix-cell">
                     <input className="cell-input wide" placeholder="바른 답" value={fixed === BLANK_FIX ? "" : review.fixed ?? ""} onChange={e => set({ fixed: e.target.value, confirmed: false })} />
@@ -71,10 +75,7 @@ export default function ReviewStep() {
                 </tr>;
               })}
             </tbody></table></div>}
-          {viewing && <div className="page-viewer">
-            <header><b>{viewing}</b><button className="link-button" onClick={() => setViewing("")}>닫기</button></header>
-            {viewPages.map(p => <figure key={p.file}><img src={p.url} alt={`${viewing} ${p.page}쪽`} /><figcaption>{p.page}쪽</figcaption></figure>)}
-          </div>}
+          {focus && <PageFocus pages={g.pagesByCode.get(focusCode) ?? []} where={g.cellInfo[focus]?.where} label={`${focusCode} · ${focusNo}번`} onClose={() => setPicked("")} />}
         </div>
       </section>
 

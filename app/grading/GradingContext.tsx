@@ -8,7 +8,7 @@ import { AnswerKeyError, loadAnswerKey, ocrSpec, pageCount, type Item } from "..
 import { addUsage, DEFAULT_PRICING, ZERO_USAGE, type Pricing, type Usage } from "../lib/assessment/cost";
 import { toCsv } from "../lib/assessment/csv";
 import { estimateShifts } from "../lib/assessment/align";
-import { blankLike, cellPair, FAINT, strokesOnly, fitForReading, grayFromBlob, grayToPng, ink, matchQuality, pickByInk, preparePage, regionPair, renderBlankPage, type Gray, type PreparedPage } from "../lib/assessment/cells";
+import { blankLike, cellPair, FAINT, toPx, strokesOnly, fitForReading, grayFromBlob, grayToPng, ink, matchQuality, pickByInk, preparePage, regionPair, renderBlankPage, type Gray, type PreparedPage } from "../lib/assessment/cells";
 import { decide, SURE, UNSURE } from "../lib/assessment/decide";
 import { gradeItem } from "../lib/assessment/grade";
 import { FormError, parseForm, type FormLayout } from "../lib/assessment/form";
@@ -23,7 +23,8 @@ export type Health = {
   // 양식 기반 칸 판독: a = Claude, b = 로컬 모델 (없으면 손글씨 칸은 모두 교사 확인)
   cells?: { ready: boolean; missing: string[]; a: string; b: string | null; verify?: string | null };
 } | null;
-export type CellInfo = { crop: string; a: string | null; b: string | null; note: string };
+// where: 이 칸이 학생 시험지(가린 쪽)의 어디에 있는지 — 쪽 번호와 쪽 크기에 대한 비율 [왼, 위, 오른, 아래]
+export type CellInfo = { crop: string; a: string | null; b: string | null; note: string; where?: { page: number; box: [number, number, number, number] } };
 export type Progress = { done: number; total: number; errors: string[] };
 
 const ACCESS_KEY = "statetistic:accessKey";
@@ -529,10 +530,20 @@ export function GradingProvider({ children }: { children: ReactNode }) {
           }
           ask.push({ no: it.no, hint: cell.hint ?? "", ...pair() });
         }
+        // 교사가 원래 시험지에서 바로 찾을 수 있게 칸 위치를 남긴다
+        const whereOf: Record<string, CellInfo["where"]> = {};
+        for (const it of items) {
+          const cell = form.cells[it.no];
+          const pp = cell && prepared.get(cell.page);
+          if (!cell || !pp) continue;
+          const [x0, y0, x1, y1] = toPx(pp.page, cell.region);
+          const { w, h } = pp.page.scan;
+          whereOf[it.no] = { page: cell.page + 1, box: [Math.max(0, x0 / w), Math.max(0, y0 / h), Math.min(1, x1 / w), Math.min(1, y1 / h)] };
+        }
         for (const q of inkOnly) {
           const crop = URL.createObjectURL(await grayToPng(fitForReading(q.student)));
           urls.current.push(crop);
-          info[reviewKey(s.code, q.no)] = { crop, a: got[q.no].answer, b: null, note: got[q.no].note ?? "" };
+          info[reviewKey(s.code, q.no)] = { crop, a: got[q.no].answer, b: null, note: got[q.no].note ?? "", where: whereOf[q.no] };
         }
         if (ask.length) {
           const payload = await Promise.all(ask.map(async q => {
@@ -541,7 +552,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
             const crop = URL.createObjectURL(studentPng);
             urls.current.push(crop);
             const key = reviewKey(s.code, q.no);
-            info[key] = { crop, a: null, b: null, note: info[key]?.note ?? "" };
+            info[key] = { crop, a: null, b: null, note: info[key]?.note ?? "", where: whereOf[q.no] };
             return { id: q.no, hint: q.hint, blank: await blobToBase64(blankPng), student: await blobToBase64(studentPng) };
           }));
           const response = await fetch("/api/assessment/cells", {

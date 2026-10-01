@@ -235,7 +235,7 @@ input[type=range] { width:100%; height:4px; margin-top:11px; accent-color:var(--
 .fix-actions { display:flex; flex-wrap:wrap; gap:4px; margin-top:4px; }
 .chip { padding:2px 8px; border:1px solid #dce1e9; border-radius:999px; background:#fff; font-size:12px; cursor:pointer; }
 .chip.on { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
-.accuracy { display:block; font-size:12px; }
+.accuracy { display:block; font-size:12px; white-space:nowrap; }
 .essay-crop { max-width:320px; max-height:140px; }
 .essay-text { width:100%; min-width:220px; padding:6px; border:1px solid #dce1e9; border-radius:6px; font:inherit; resize:vertical; }
 .ok-cell { color:#047857; font-weight:600; }
@@ -314,12 +314,21 @@ input[type=range] { width:100%; height:4px; margin-top:11px; accent-color:var(--
 .link-button { border:0; background:none; color:var(--blue); font-weight:700; cursor:pointer; padding:0 4px; font-size:12px; text-decoration:underline; }
 .link-button.on { color:var(--coral); }
 .link-button:disabled { color:#aeb4bf; cursor:not-allowed; }
-.review-split { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px; align-items:start; }
+.review-split { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,1fr); gap:12px; align-items:start; }
 .page-viewer { position:sticky; top:8px; max-height:80vh; overflow:auto; border:1px solid var(--line); border-radius:8px; padding:8px; background:#fafbfd; }
 .page-viewer header { display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px; }
 .page-viewer figure { margin:0 0 8px; }
 .page-viewer img { width:100%; border:1px solid #cfd5df; }
 .page-viewer figcaption { font-size:11px; color:#6f788b; text-align:center; }
+.page-focus { max-height:calc(100vh - 24px); }
+.page-focus header { gap:8px; align-items:center; flex-wrap:wrap; }
+.page-tabs { display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+.focus-figure { position:relative; margin:0; }
+.focus-figure.big { width:200%; }
+.focus-figure img { display:block; width:100%; }
+.focus-mark { position:absolute; border:3px solid #e11d48; border-radius:4px; box-shadow:0 0 0 9999px rgba(15,23,42,.18); pointer-events:none; }
+tr.focused-row td { background:#eef4ff; }
+.review-split tbody tr { cursor:pointer; }
 .essay-block { border-top:1px solid #eef0f4; padding-top:12px; margin-top:12px; }
 .rubric-box { background:#f6f8fd; border:1px solid #e3e8f5; border-radius:7px; padding:10px 12px; font-size:12px; color:#3a4460; }
 .rubric-box p { margin:6px 0 0; line-height:1.6; }

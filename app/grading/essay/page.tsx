@@ -6,11 +6,13 @@ import { useState } from "react";
 import { costKrw, formatKrw } from "../../lib/assessment/cost";
 import { reviewKey } from "../../lib/assessment/records";
 import { useGrading } from "../GradingContext";
+import { PageFocus } from "../PageFocus";
 
 // 서술형은 AI가 점수를 확정하지 않는다. AI 제안은 참고, 점수는 교사가 정하고 언제든 다시 열어 고칠 수 있다.
 export default function EssayStep() {
   const g = useGrading();
-  const [viewing, setViewing] = useState("");
+  // 원래 시험지 보기: null = 첫 줄을 자동으로, "" = 닫음, 그 밖 = 고른 칸(학생코드|문항)
+  const [picked, setPicked] = useState<string | null>(null);
   const [zoom, setZoom] = useState<{ src: string; label: string } | null>(null);
   const [showBlank, setShowBlank] = useState(false);
   const r = g.result;
@@ -20,7 +22,9 @@ export default function EssayStep() {
   const essayItems = g.items.filter(it => it.kind === "서술");
   const total = r.essayQueue.length;
   const done = r.essayQueue.filter(q => g.essayReview[reviewKey(q.code, q.no)]?.final != null).length;
-  const viewPages = viewing ? g.pagesByCode.get(viewing) ?? [] : [];
+  const focus = picked ?? (r?.essayQueue[0] ? reviewKey(r.essayQueue[0].code, r.essayQueue[0].no) : "") ?? "";
+  const focusCode = focus.split("|")[0];
+  const focusNo = focus.split("|")[1] ?? "";
 
   const setScore = (k: string, value: number | null) => g.setEssayReview(v => ({ ...v, [k]: { ...v[k], final: value } }));
   const setText = (k: string, text: string, original = "") => g.setReadReview(v => ({ ...v, [k]: { ...v[k], fixed: text === original ? "" : text } }));
@@ -37,7 +41,7 @@ export default function EssayStep() {
         <label className="approve-check"><input type="checkbox" checked={showBlank} onChange={e => setShowBlank(e.target.checked)} /> 무응답(빈칸)으로 처리된 답도 보기 — 글씨를 놓친 칸이 있으면 글을 적어 채점 목록에 올립니다</label>
       </section>
 
-      <div className={viewing ? "review-split" : ""}>
+      <div className={focus ? "review-split" : ""}>
         <div>
           {essayItems.map(it => {
             const queue = r.essayQueue.filter(q => q.no === it.no);
@@ -60,8 +64,8 @@ export default function EssayStep() {
                   const er = g.essayReview[k] ?? {};
                   const crop = g.cellInfo[k]?.crop;
                   const confirmed = er.final != null;
-                  return <tr key={k} className={confirmed ? "reviewed-row" : ""}>
-                    <td><button className={`link-button ${viewing === q.code ? "on" : ""}`} onClick={() => setViewing(v => (v === q.code ? "" : q.code))}>{q.code}</button></td>
+                  return <tr key={k} className={`${confirmed ? "reviewed-row" : ""} ${focus === k ? "focused-row" : ""}`} onClick={() => setPicked(k)}>
+                    <td><button className={`link-button ${focus === k ? "on" : ""}`} onClick={() => setPicked(k)}>{q.code}</button></td>
                     <td>{crop ? <button className="crop-button" onClick={() => setZoom({ src: crop, label: `${q.code} · ${q.no}번` })}><img className="cell-crop essay-crop" src={crop} alt={`${q.code} ${q.no} 손글씨`} /></button> : <small>시험지 보기</small>}</td>
                     <td className="essay-cell"><textarea className="essay-text" rows={3} value={g.readReview[k]?.fixed || q.answer} onChange={e => setText(k, e.target.value, g.readings[q.code]?.[q.no]?.answer ?? "")} />
                       {g.cellInfo[k]?.note && <small className="reading-pair">{g.cellInfo[k].note}</small>}</td>
@@ -96,10 +100,7 @@ export default function EssayStep() {
           })}
           {essayItems.length === 0 && <section className="grading-card"><p className="helper-line">서술형 문항이 없습니다.</p></section>}
         </div>
-        {viewing && <div className="page-viewer">
-          <header><b>{viewing}</b><button className="link-button" onClick={() => setViewing("")}>닫기</button></header>
-          {viewPages.map(p => <figure key={p.file}><img src={p.url} alt={`${viewing} ${p.page}쪽`} /><figcaption>{p.page}쪽</figcaption></figure>)}
-        </div>}
+        {focus && <PageFocus pages={g.pagesByCode.get(focusCode) ?? []} where={g.cellInfo[focus]?.where} label={`${focusCode} · ${focusNo}번`} onClose={() => setPicked("")} />}
       </div>
 
       {zoom && <div className="zoom-overlay" onClick={() => setZoom(null)} role="dialog" aria-label="손글씨 크게 보기">
