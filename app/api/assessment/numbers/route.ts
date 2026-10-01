@@ -45,8 +45,8 @@ export async function POST(request: Request) {
       },
       required: ["rows"],
     };
-    const model = process.env.GEMINI_READER_MODEL?.trim() || "gemini-3.8-flash";
-    const { data, usage } = await callGemini({ ...cfg, model }, parts, schema);
+    const model = cfg.model;
+    const { data, usage } = await callGemini(cfg, parts, schema);
     const rows = (Array.isArray(data.rows) ? data.rows : []) as Array<{ id: string; 반: number | null; 번호: number | null; 확실?: boolean }>;
     // 모델이 스스로 매긴 "확실"은 믿기 어렵다(3/7을 확실하다고 함) → 확인 판독기가 있으면 다른 계열로 한 번 더 읽어 다르면 애매로 표시
     const second = await readNumbersWithClaude(crops, keys).catch(() => null);

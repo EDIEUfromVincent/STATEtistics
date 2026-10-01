@@ -45,7 +45,7 @@ export type CellInfo = { crop: string; a: string | null; b: string | null; note:
 export type Progress = { done: number; total: number; errors: string[] };
 
 // 로그인한 선생님과 그 선생님이 넣은 API 키 상태(끝 네 자리). 판독 요금은 각자 키로 나간다
-export type Me = { teacher: { email: string; name: string } | null; keys?: { gemini: string; geminiPaid: boolean; anthropic: string }; loginReady: boolean } | null;
+export type Me = { teacher: { email: string; name: string } | null; keys?: { gemini: string; geminiPaid: boolean; geminiModel?: string; anthropic: string }; loginReady: boolean } | null;
 
 type GradingState = {
   me: Me; signedIn: boolean; refreshMe: () => Promise<void>; health: Health; pricing: Pricing;
@@ -805,14 +805,15 @@ export function GradingProvider({ children }: { children: ReactNode }) {
             info[reviewKey(s.code, it.no)] = { crop: "", a: null, b: null, note: "이 쪽이 빈 양식과 잘 겹치지 않음" };
             continue;
           }
+          // 고르는 칸·보기 번호 칸은 잉크만으로 정하지 않는다. 6-4반에서 보기 번호 위에 겹쳐 그은 체크는 인쇄 글자와 겹쳐
+          // 잉크가 거의 안 잡혀(9) 빈칸으로, 낱말을 크게 두른 동그라미는 선이 옆 낱말 상자를 지나 반대 낱말로 확정되었다.
+          // 잉크가 정말 하나도 없는 고르는 칸만 빈칸으로 둔다.
           if (cell.kind === "pick") {
-            const r = pickByInk(pp.page, cell);
-            if (r.pick === "" && amount < 40) { byInk(it.no, "", pair); continue; }
-            if (r.pick) { byInk(it.no, r.pick, pair); continue; }
+            if (amount < 15 && pickByInk(pp.page, cell).pick === "") { byInk(it.no, "", pair); continue; }
             ask.push({ no: it.no, hint: cell.hint ?? "( 가 / 나 ) 중 ○표 한 낱말", ...pair() });
             continue;
           }
-          if (amount < (cell.kind === "number" ? 80 : 40)) { byInk(it.no, "", pair); continue; }
+          if (cell.kind === "write" && amount < 40) { byInk(it.no, "", pair); continue; }
           if (cell.kind === "number" && pickByInk(pp.page, cell).pick === "") {
             // 보기에 표시가 없다 → 답은 문제 옆에 쓴 번호뿐이어야 한다. 확인 판독 때 인쇄를 지운 조각을 쓴다
             const only = strokesOnly(pp.page, cell.region);

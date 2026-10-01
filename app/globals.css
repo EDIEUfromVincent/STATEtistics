@@ -253,6 +253,11 @@ input[type=range] { width:100%; height:4px; margin-top:11px; accent-color:var(--
 .preview-pages figure { margin:0; text-align:center; font-size:11px; color:#6f788b; }
 .preview-pages img { width:130px; border:1px solid #cfd5df; border-radius:3px; display:block; }
 .approve-check { display:flex; gap:8px; align-items:center; font-size:13px; font-weight:700; margin:12px 0 8px; }
+.model-choices { display:grid; gap:8px; }
+.model-choice { display:grid; grid-template-columns:auto 1fr auto; gap:2px 10px; align-items:center; border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:13px; cursor:pointer; }
+.model-choice.on { border-color:var(--blue); background:#f2f5fe; }
+.model-choice span { color:var(--blue); font-weight:800; white-space:nowrap; }
+.model-choice small { grid-column:2 / 4; color:var(--muted); }
 .analysis-load { display:grid; gap:8px; }
 .section-title { font-size:15px; margin:10px 0 0; color:#1e2b4c; }
 .standard-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }

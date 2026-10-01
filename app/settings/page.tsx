@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { AppHeader } from "../components/AppHeader";
 import { useGrading } from "../grading/GradingContext";
+import { GEMINI_MODELS, geminiModelOf } from "../lib/assessment/models";
 
 // 선생님 각자의 API 키. 판독 요금은 이 키로 나간다. 키는 서버에 암호화해 저장하고 화면에는 끝 네 자리만 보인다.
 export default function SettingsPage() {
@@ -46,7 +47,7 @@ export default function SettingsPage() {
           </section>
         ) : <>
           <section className="grading-card">
-            <header><h3>Gemini API 키 (필수)</h3><p>답 칸 판독, 정답표 초안, 반·번호 판독에 씁니다. 한 반(24명) 판독에 약 1,500원(Gemini 3.8 Flash 기준, 추정)이 듭니다.</p></header>
+            <header><h3>Gemini API 키 (필수)</h3><p>답 칸 판독, 정답표 초안, 반·번호 판독, 서술형 제안에 씁니다. 요금은 아래에서 고른 모델에 따라 다릅니다.</p></header>
             <p className={k?.gemini ? "ok-note" : "warn-note"}>{k?.gemini ? `저장된 키 ${k.gemini}${k.geminiPaid ? " · 유료 등급" : " · 유료 등급 표시 안 됨"}` : "아직 키가 없습니다."}</p>
             <ol className="helper-line">
               <li><a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">Google AI Studio → API 키</a>에서 키를 만듭니다.</li>
@@ -59,6 +60,20 @@ export default function SettingsPage() {
             <div className="grading-actions">
               <button className="primary-action" disabled={!!busy || (!gemini && paid == null)} onClick={() => save({ ...(gemini ? { gemini } : {}), geminiPaid: paidChecked }, "Gemini 키를")}>{busy === "Gemini 키를" ? "확인 중…" : "저장"}</button>
               {k?.gemini && <button className="secondary-action" disabled={!!busy} onClick={() => save({ clear: "gemini" }, "Gemini 키 삭제를")}>키 지우기</button>}
+            </div>
+          </section>
+          <section className="grading-card">
+            <header><h3>판독 모델 (Gemini)</h3><p>고른 모델이 답 칸 판독·정답표 초안·반·번호 판독에 모두 쓰입니다. 요금은 공개 요금표로 잰 추정이고, 실제 청구액은 Google 결제 화면이 기준입니다.</p></header>
+            <div className="model-choices">
+              {GEMINI_MODELS.map(m => {
+                const on = geminiModelOf(k?.geminiModel).id === m.id;
+                return <label key={m.id} className={`model-choice${on ? " on" : ""}`}>
+                  <input type="radio" name="gemini-model" checked={on} disabled={!!busy} onChange={() => save({ geminiModel: m.id }, `판독 모델(${m.label})을`)} />
+                  <b>{m.label}</b>
+                  <span>{m.perClass}</span>
+                  <small>{m.note} · 입력 ${m.input} / 출력 ${m.output} (100만 토큰당)</small>
+                </label>;
+              })}
             </div>
           </section>
           <section className="grading-card">

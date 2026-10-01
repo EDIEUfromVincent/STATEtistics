@@ -73,8 +73,8 @@ ${answerText || "(정답·해설 쪽이 없습니다 — 정답은 모두 비우
       },
       required: ["rows"],
     };
-    const model = process.env.GEMINI_READER_MODEL?.trim() || "gemini-3.8-flash";
-    const { data, usage } = await callGemini({ ...cfg, model }, [{ text: prompt }], schema);
+    const model = cfg.model;
+    const { data, usage } = await callGemini(cfg, [{ text: prompt }], schema);
     const rows = (Array.isArray(data.rows) ? data.rows : []) as Array<Record<string, unknown>>;
     await audit("assessment_draft_key", { cells: cells.length, rows: rows.length, model, usage });
     const usd = (usage.input * cfg.priceInputPerM + (usage.output + usage.thoughts) * cfg.priceOutputPerM) / 1e6;

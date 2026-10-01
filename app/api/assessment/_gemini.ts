@@ -1,4 +1,5 @@
 import { AuthError, requireTeacher, teacherKeys, type TeacherKeys } from "../../lib/server/auth.ts";
+import { geminiModelOf } from "../../lib/assessment/models.ts";
 
 // 채점용 Gemini 중계. 요청한 선생님(구글 로그인)의 API 키로 부른다. 서버가 받는 것은 이름 칸을 가린 페이지 이미지와 이름을 가린 서술형 텍스트뿐이다.
 // 이미지·텍스트는 저장하지 않고, 로그에는 해시와 크기만 남긴다.
@@ -14,14 +15,16 @@ export class AssessmentApiError extends Error {
 }
 
 export function geminiConfig(keys?: TeacherKeys) {
+  // 선생님이 "내 API 키"에서 고른 모델 (모든 Gemini 요청에 같은 모델). 요금도 그 모델의 요금표로 잰다
+  const model = geminiModelOf(keys?.geminiModel || process.env.GEMINI_READER_MODEL?.trim());
   return {
     apiKey: keys?.gemini ?? "",
-    model: process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash",
+    model: model.id,
     // 무료 등급은 입력 데이터가 제품 개선에 쓰일 수 있어 학생 자료에 쓰지 않는다 (선생님이 "유료 등급 키"라고 표시해야 쓴다)
     paidTier: Boolean(keys?.geminiPaid),
     // 요금표 기준 추정용 (USD per 1M tokens). 실제 청구액은 각 선생님의 Google Cloud 결제 화면이 기준이다
-    priceInputPerM: Number(process.env.GEMINI_PRICE_INPUT_PER_M) || 0.3,
-    priceOutputPerM: Number(process.env.GEMINI_PRICE_OUTPUT_PER_M) || 2.5,
+    priceInputPerM: model.input,
+    priceOutputPerM: model.output,
     usdKrw: Number(process.env.USD_KRW) || 1400,
   };
 }

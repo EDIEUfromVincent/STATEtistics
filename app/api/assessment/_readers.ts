@@ -25,7 +25,7 @@ export function readerConfig(keys?: TeacherKeys) {
   return {
     provider,
     geminiReady: Boolean(gemini.apiKey) && gemini.paidTier,
-    geminiModel: process.env.GEMINI_READER_MODEL?.trim() || "gemini-3.8-flash",
+    geminiModel: gemini.model,
     claudeReady: Boolean(keys?.anthropic),
     claudeModel,
     claudePrice: CLAUDE_PRICES[claudeModel] ?? [4, 20],
@@ -117,8 +117,7 @@ export async function readWithClaude(cells: CellInput[], keys: TeacherKeys, mode
 
 /** 판독 A (Gemini를 고른 경우): Claude와 같은 조각·같은 규칙으로 학생 한 명을 요청 한 번에 */
 export async function readWithGemini(cells: CellInput[], keys: TeacherKeys) {
-  const cfg = readerConfig(keys);
-  const gemini = { ...geminiConfig(keys), model: cfg.geminiModel };
+  const gemini = geminiConfig(keys);
   const parts: unknown[] = [
     { text: `시험지의 답 칸 ${cells.length}개입니다. 칸마다 이미지 두 장이 이어집니다: 첫째는 아무것도 쓰지 않은 빈 양식, 둘째는 학생이 푼 시험지의 같은 칸입니다.\n${RULES}\n칸마다 id, added, answer, form_differs, multiple_marks를 적으세요.` },
   ];

@@ -2,6 +2,7 @@
 // 누구나 구글 계정으로 로그인하면 자기 공간이 생긴다. 판독 요금은 각 선생님이 넣은 자기 API 키로 나간다.
 
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { geminiModelOf } from "../assessment/models.ts";
 import { getDb } from "./db.ts";
 
 export class AuthError extends Error {
@@ -138,14 +139,14 @@ export function decrypt(packed: string) {
   return Buffer.concat([d.update(body), d.final()]).toString("utf8");
 }
 
-export type TeacherKeys = { gemini: string; geminiPaid: boolean; anthropic: string };
+export type TeacherKeys = { gemini: string; geminiPaid: boolean; geminiModel: string; anthropic: string };
 
 export async function teacherKeys(teacherId: number): Promise<TeacherKeys> {
   const db = await getDb();
-  const r = (await db.query<{ gemini_enc: string | null; gemini_paid: boolean; anthropic_enc: string | null }>(
-    "SELECT gemini_enc, gemini_paid, anthropic_enc FROM teacher_keys WHERE teacher_id = $1", [teacherId]))[0];
+  const r = (await db.query<{ gemini_enc: string | null; gemini_paid: boolean; gemini_model: string | null; anthropic_enc: string | null }>(
+    "SELECT gemini_enc, gemini_paid, gemini_model, anthropic_enc FROM teacher_keys WHERE teacher_id = $1", [teacherId]))[0];
   const open = (v: string | null) => { try { return v ? decrypt(v) : ""; } catch { return ""; } };
-  return { gemini: open(r?.gemini_enc ?? null), geminiPaid: Boolean(r?.gemini_paid), anthropic: open(r?.anthropic_enc ?? null) };
+  return { gemini: open(r?.gemini_enc ?? null), geminiPaid: Boolean(r?.gemini_paid), geminiModel: geminiModelOf(r?.gemini_model).id, anthropic: open(r?.anthropic_enc ?? null) };
 }
 
 export const tail = (key: string) => (key ? `…${key.slice(-4)}` : "");

@@ -1,5 +1,6 @@
 import { AuthError, encrypt, requireTeacher, tail, teacherKeys } from "../../../lib/server/auth";
 import { getDb } from "../../../lib/server/db";
+import { GEMINI_MODELS } from "../../../lib/assessment/models";
 
 // 선생님이 자기 API 키를 넣는다. 저장 전에 실제로 쓸 수 있는 키인지 가볍게 확인한다(요금이 들지 않는 모델 목록 조회).
 async function checkGemini(key: string) {
@@ -14,7 +15,7 @@ async function checkAnthropic(key: string) {
 export async function POST(request: Request) {
   try {
     const t = await requireTeacher(request);
-    const body = (await request.json()) as { gemini?: string; geminiPaid?: boolean; anthropic?: string; clear?: "gemini" | "anthropic" };
+    const body = (await request.json()) as { gemini?: string; geminiPaid?: boolean; geminiModel?: string; anthropic?: string; clear?: "gemini" | "anthropic" };
     const db = await getDb();
     await db.query("INSERT INTO teacher_keys (teacher_id) VALUES ($1) ON CONFLICT (teacher_id) DO NOTHING", [t.id]);
     if (body.clear === "gemini") await db.query("UPDATE teacher_keys SET gemini_enc = NULL, gemini_paid = false, updated_at = now() WHERE teacher_id = $1", [t.id]);
@@ -25,6 +26,10 @@ export async function POST(request: Request) {
       await checkGemini(gemini);
       await db.query("UPDATE teacher_keys SET gemini_enc = $2, updated_at = now() WHERE teacher_id = $1", [t.id, encrypt(gemini)]);
     }
+    if (typeof body.geminiModel === "string") {
+      if (!GEMINI_MODELS.some(m => m.id === body.geminiModel)) throw new AuthError("고를 수 없는 모델입니다.", 400);
+      await db.query("UPDATE teacher_keys SET gemini_model = $2, updated_at = now() WHERE teacher_id = $1", [t.id, body.geminiModel]);
+    }
     if (typeof body.geminiPaid === "boolean") await db.query("UPDATE teacher_keys SET gemini_paid = $2, updated_at = now() WHERE teacher_id = $1", [t.id, body.geminiPaid]);
     const anthropic = body.anthropic?.trim();
     if (anthropic) {
@@ -33,7 +38,7 @@ export async function POST(request: Request) {
       await db.query("UPDATE teacher_keys SET anthropic_enc = $2, updated_at = now() WHERE teacher_id = $1", [t.id, encrypt(anthropic)]);
     }
     const k = await teacherKeys(t.id);
-    return Response.json({ gemini: tail(k.gemini), geminiPaid: k.geminiPaid, anthropic: tail(k.anthropic) });
+    return Response.json({ gemini: tail(k.gemini), geminiPaid: k.geminiPaid, geminiModel: k.geminiModel, anthropic: tail(k.anthropic) });
   } catch (e) {
     return Response.json({ error: e instanceof AuthError ? e.message : "키를 저장하지 못했습니다." }, { status: e instanceof AuthError ? e.status : 500 });
   }

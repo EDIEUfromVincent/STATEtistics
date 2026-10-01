@@ -28,6 +28,8 @@ const SCHEMA = [
      rows JSONB NOT NULL,
      created_at TIMESTAMPTZ NOT NULL DEFAULT now())`,
   `CREATE INDEX IF NOT EXISTS records_teacher_class ON records (teacher_id, class_name, month)`,
+  // 선생님이 고른 Gemini 판독 모델 (비우면 기본 모델)
+  `ALTER TABLE teacher_keys ADD COLUMN IF NOT EXISTS gemini_model TEXT`,
 ];
 
 let ready: Promise<Db> | null = null;
