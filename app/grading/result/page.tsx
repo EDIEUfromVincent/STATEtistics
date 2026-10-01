@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { addUsage, costKrw, formatKrw } from "../../lib/assessment/cost";
-import { pendingCount, READ_FAILED } from "../../lib/assessment/records";
+import { toCsv } from "../../lib/assessment/csv";
+import { pendingCount, READ_FAILED, scoreSheet } from "../../lib/assessment/records";
 import { setCurrentDataset } from "../../lib/dataset";
 import { downloadBlob } from "../../lib/generator";
 import { useGrading } from "../GradingContext";
@@ -19,6 +20,8 @@ export default function ResultStep() {
   const failedRows = r.rows.filter(x => x.채점방식 === READ_FAILED).length;
   const totalUsage = addUsage(g.ocrUsage, g.essayUsage);
 
+  const sheet = scoreSheet(r.rows, g.items);
+
   function analyze() {
     setCurrentDataset({ name: g.assessmentId || "채점 결과", source: "채점", real: !g.demo, csv: g.resultCsv() });
     router.push("/analysis");
@@ -26,7 +29,7 @@ export default function ResultStep() {
 
   return (
     <section className="grading-card">
-      <header><span>7</span><h3>결과</h3><p>결과에는 학생 코드만 들어갑니다. 이름으로 되돌릴 때는 보관한 명부 파일을 씁니다.</p></header>
+      <header><span>7</span><h3>결과</h3><p>결과에는 학생 번호와 가명 코드만 들어가고 이름은 들어가지 않습니다.</p></header>
       <div className="kpi-grid">
         <div className="kpi"><span>응시</span><strong>{g.students.length}명</strong><small>{g.failedCodes.length ? `판독 실패 ${g.failedCodes.length}명` : "모두 판독됨"}</small></div>
         <div className="kpi"><span>채점 행</span><strong>{r.rows.length}</strong></div>
@@ -38,7 +41,19 @@ export default function ResultStep() {
       {r.essayQueue.length > 0 && <p className="helper-line">서술형 점수를 바꾸고 싶으면 <Link href="/grading/essay">서술형 채점</Link>으로 돌아가 고친 뒤, 아래 &quot;이 결과로 분석하기&quot;를 다시 누르세요.</p>}
       <div className="grading-actions">
         <button className="primary-action" onClick={analyze}>이 결과로 분석하기 →</button>
-        <button className="secondary-action" onClick={() => downloadBlob(`﻿${g.resultCsv()}`, `${g.assessmentId || "평가"}_응답_long.csv`, "text/csv")}>응답_long.csv 내려받기</button>
+        <button className="secondary-action" onClick={() => downloadBlob(`﻿${toCsv(sheet.columns, sheet.rows)}`, `${g.assessmentId || "평가"}_학생별_점수표.csv`, "text/csv")}>학생별 점수표 (시트용) 내려받기</button>
+        <button className="secondary-action" onClick={() => downloadBlob(`﻿${g.resultCsv()}`, `${g.assessmentId || "평가"}_응답_long.csv`, "text/csv")}>응답_long.csv (분석용) 내려받기</button>
+      </div>
+      <h4>학생별 득점률 (번호 순서, 확정된 문항만)</h4>
+      <div className="score-bars" role="img" aria-label="학생별 득점률 막대그래프">
+        {sheet.rows.map(row => {
+          const pct = Number(row["득점률(%)"] || 0);
+          return <div className="score-bar" key={row.코드} title={`${row.번호}번 · ${row.코드}: ${row["합계"]}/${row["확정 배점"]}점${row["미확정"] !== "0" ? ` · 미확정 ${row["미확정"]}문항` : ""}`}>
+            <span className="score-label">{row.번호 ? `${row.번호}번` : row.코드}</span>
+            <span className="score-track"><span className="score-fill" style={{ width: `${pct}%` }} /></span>
+            <span className="score-value">{row["득점률(%)"] ? `${row["득점률(%)"]}%` : "–"}{row["미확정"] !== "0" ? <small> · 미확정 {row["미확정"]}</small> : null}</span>
+          </div>;
+        })}
       </div>
     </section>
   );

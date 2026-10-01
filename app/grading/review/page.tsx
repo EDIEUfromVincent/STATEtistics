@@ -54,7 +54,7 @@ export default function ReviewStep() {
                 const graded = item ? gradeItem(item, finalAnswer) : null;
                 const set = (v: { confirmed?: boolean; fixed?: string }) => g.setReadReview(all => ({ ...all, [k]: { ...all[k], ...v } }));
                 return <tr key={k} className={`${q.reviewed ? "reviewed-row" : ""} ${focus === k ? "focused-row" : ""}`} onClick={() => setPicked(k)}>
-                  <td><button className={`link-button ${focus === k ? "on" : ""}`} onClick={() => setPicked(k)}>{q.code}</button></td>
+                  <td><button className={`link-button ${focus === k ? "on" : ""}`} onClick={() => setPicked(k)}>{g.label(q.code)}</button></td>
                   <td>{q.no}</td>
                   {g.useCells && <td>{info?.crop
                     ? <button className="crop-button" onClick={() => setZoom({ src: info.crop, label: `${q.code} · ${q.no}번` })}><img className="cell-crop" src={info.crop} alt={`${q.code} ${q.no} 칸`} /></button>
@@ -75,7 +75,7 @@ export default function ReviewStep() {
                 </tr>;
               })}
             </tbody></table></div>}
-          {focus && <PageFocus pages={g.pagesByCode.get(focusCode) ?? []} where={g.cellInfo[focus]?.where} label={`${focusCode} · ${focusNo}번`} onClose={() => setPicked("")} />}
+          {focus && <PageFocus pages={g.pagesByCode.get(focusCode) ?? []} where={g.cellInfo[focus]?.where} label={`${g.label(focusCode)} · ${focusNo}번`} onClose={() => setPicked("")} />}
         </div>
       </section>
 

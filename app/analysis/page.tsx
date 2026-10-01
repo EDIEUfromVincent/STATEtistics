@@ -24,6 +24,7 @@ export default function AnalysisPage() {
     const per = studentStandards(data.rows);
     return { items, per, cls: classStandards(per), dist: distractors(data.rows), pending: pendingCount(data.rows) };
   }, [data]);
+  const who = useMemo(() => makeWho(data?.rows ?? []), [data]);
 
   return (
     <main>
@@ -49,7 +50,7 @@ export default function AnalysisPage() {
               return <article className="standard-card" key={c.성취기준}>
                 <header><b>{c.성취기준}</b><span>{s?.statement ?? "성취기준 원문이 아직 등록되지 않았습니다"}</span></header>
                 <div className="rate-bar"><i style={{ width: pct(c.평균득점률) }} /><em>반 평균 득점률 {pct(c.평균득점률)}</em></div>
-                <p>관련 문항 {c.문항수}개 · 행동영역 {c.행동영역 || "–"} · 절반 미만 {c.절반미만학생수}명{weak.length ? `: ${weak.map(w => w.학생코드).join(", ")}` : ""}</p>
+                <p>관련 문항 {c.문항수}개 · 행동영역 {c.행동영역 || "–"} · 절반 미만 {c.절반미만학생수}명{weak.length ? `: ${[...weak].sort((a, b) => who.compare(a.학생코드, b.학생코드)).map(w => who.label(w.학생코드)).join(", ")}` : ""}</p>
                 {s && <details><summary>성취수준 기술 (비교용)</summary><dl>{(["A", "B", "C"] as const).map(k => <div key={k}><dt>{k}</dt><dd>{s.levels[k]}</dd></div>)}</dl><small>{s.source}</small></details>}
               </article>;
             })}
@@ -70,7 +71,7 @@ export default function AnalysisPage() {
           <p className="helper-line">변별도 = 상위 27% 정답률 − 하위 27% 정답률. 0 이하인 문항(빨간 칸)은 문항 자체를 점검해 보세요.</p>
 
           <h3 className="section-title">학생 × 성취기준 득점률</h3>
-          <StudentMatrix per={analysis.per} standards={analysis.cls.map(c => c.성취기준)} />
+          <StudentMatrix per={analysis.per} standards={analysis.cls.map(c => c.성취기준)} who={who} />
 
           <div className="grading-actions">
             <Link className="primary-action" href="/studio">같은 데이터로 시각화 · 예측 →</Link>
@@ -83,17 +84,27 @@ export default function AnalysisPage() {
   );
 }
 
+// 결과에 학생번호가 있으면 "13번 · K3M"으로 표시하고 번호 순서로 나열한다
+type Who = { label: (code: string) => string; compare: (a: string, b: string) => number };
+function makeWho(rows: Array<{ 학생코드: string; 학생번호?: string }>): Who {
+  const num = new Map(rows.filter(r => r.학생번호).map(r => [r.학생코드, Number(r.학생번호)]));
+  return {
+    label: code => (num.has(code) ? `${num.get(code)}번 · ${code}` : code),
+    compare: (a, b) => (num.get(a) ?? Infinity) - (num.get(b) ?? Infinity) || a.localeCompare(b),
+  };
+}
+
 function EmptyState({ title, body, studio }: { title: string; body: string; studio?: boolean }) {
   return <section className="studio-empty"><span>DATA</span><h3>{title}</h3><p>{body}</p>
     <div className="empty-links"><Link href="/grading">시험지 채점</Link><Link href="/">합성 데이터 생성</Link><Link href="/import">CSV 가져오기</Link>{studio && <Link href="/studio">시각화 · 예측</Link>}</div>
   </section>;
 }
 
-function StudentMatrix({ per, standards }: { per: ReturnType<typeof studentStandards>; standards: string[] }) {
-  const codes = [...new Set(per.map(p => p.학생코드))].sort();
+function StudentMatrix({ per, standards, who }: { per: ReturnType<typeof studentStandards>; standards: string[]; who: Who }) {
+  const codes = [...new Set(per.map(p => p.학생코드))].sort(who.compare);
   const cell = new Map(per.map(p => [`${p.학생코드}|${p.성취기준}`, p]));
   return <div className="table-scroll small-table"><table className="matrix"><thead><tr><th>학생</th>{standards.map(s => <th key={s}>{s}</th>)}</tr></thead><tbody>
-    {codes.map(code => <tr key={code}><td><b>{code}</b></td>{standards.map(s => {
+    {codes.map(code => <tr key={code}><td><b>{who.label(code)}</b></td>{standards.map(s => {
       const p = cell.get(`${code}|${s}`);
       const v = p?.득점률;
       return <td key={s} title={p?.틀린문항 ? `틀린 문항: ${p.틀린문항}` : ""} style={{ background: v == null ? "#f4f5f8" : `rgba(55,88,211,${0.1 + v * 0.75})`, color: v != null && v > 0.55 ? "white" : undefined }}>{pct(v)}</td>;

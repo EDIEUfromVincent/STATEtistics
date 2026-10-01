@@ -7,7 +7,7 @@ import { AppHeader } from "../components/AppHeader";
 import { useGrading } from "./GradingContext";
 
 export const STEPS = [
-  { href: "/grading", label: "명부" },
+  { href: "/grading", label: "학생 번호" },
   { href: "/grading/key", label: "정답표" },
   { href: "/grading/photos", label: "사진 · 가림 · 승인" },
   { href: "/grading/ocr", label: "판독" },

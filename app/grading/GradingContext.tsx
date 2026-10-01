@@ -8,12 +8,12 @@ import { AnswerKeyError, loadAnswerKey, ocrSpec, pageCount, type Item } from "..
 import { addUsage, DEFAULT_PRICING, ZERO_USAGE, type Pricing, type Usage } from "../lib/assessment/cost";
 import { toCsv } from "../lib/assessment/csv";
 import { estimateShifts } from "../lib/assessment/align";
-import { blankLike, cellPair, FAINT, toPx, strokesOnly, fitForReading, grayFromBlob, grayToPng, ink, matchQuality, pickByInk, preparePage, regionPair, renderBlankPage, type Gray, type PreparedPage } from "../lib/assessment/cells";
+import { blankLike, cellPair, cropByRegistration, FAINT, headerNumberBox, register, toPx, strokesOnly, fitForReading, grayFromBlob, grayToPng, ink, matchQuality, pickByInk, preparePage, regionPair, renderBlankPage, type Gray, type PreparedPage } from "../lib/assessment/cells";
 import { decide, SURE, UNSURE } from "../lib/assessment/decide";
 import { gradeItem } from "../lib/assessment/grade";
 import { FormError, parseForm, type FormLayout } from "../lib/assessment/form";
 import { applyLayout, blobToBase64, demoPage, LAYOUTS, openPages, processPage, processStaged, stagePage, TEMPLATES, type ProcessedPage } from "../lib/assessment/images";
-import { createRoster, maskNames, parseRoster, present, sha256Hex, type Student } from "../lib/assessment/privacy";
+import { createRoster, maskNames, numberRoster, parseNumberList, parseRoster, present, sha256Hex, studentLabel, type Student } from "../lib/assessment/privacy";
 import { buildRows, LONG_COLUMNS, reviewKey, type BuildResult, type EssayReview, type Reading, type Readings, type ReadReview } from "../lib/assessment/records";
 import { SAMPLE_KEY_CSV, SAMPLE_KEY_NAME } from "../lib/assessment/sampleKey";
 import { demoNames, syntheticReadings } from "../lib/assessment/synthetic";
@@ -32,6 +32,8 @@ const ACCESS_KEY = "statetistic:accessKey";
 type GradingState = {
   accessKey: string; updateAccessKey: (v: string) => void; health: Health; pricing: Pricing;
   namesText: string; setNamesText: (v: string) => void; roster: Student[]; rosterError: string;
+  className: string; setClassName: (v: string) => void; studentCount: string; setStudentCount: (v: string) => void;
+  absentText: string; setAbsentText: (v: string) => void; label: (code: string) => string;
   makeRoster: () => boolean; loadRosterFile: (f?: File) => Promise<boolean>; toggleAbsent: (code: string) => void;
   keyName: string; items: Item[]; keyError: string; applyKey: (text: string, name: string) => boolean;
   assessmentId: string; setAssessmentId: (v: string) => void; source: string; setSource: (v: string) => void;
@@ -67,7 +69,11 @@ export function GradingProvider({ children }: { children: ReactNode }) {
   const [accessKey, setAccessKey] = useState(() => (typeof window === "undefined" ? "" : sessionStorage.getItem(ACCESS_KEY) ?? ""));
   const [health, setHealth] = useState<Health>(null);
 
+  // 이름 목록은 선택: 답에 쓴 이름을 가릴 때만 쓰고 화면·결과에는 내보내지 않는다
   const [namesText, setNamesText] = useState("");
+  const [className, setClassName] = useState("");
+  const [studentCount, setStudentCount] = useState("");
+  const [absentText, setAbsentText] = useState("");
   const [roster, setRoster] = useState<Student[]>([]);
   const [rosterError, setRosterError] = useState("");
 
@@ -127,18 +133,23 @@ export function GradingProvider({ children }: { children: ReactNode }) {
 
   const template = TEMPLATES.find(t => t.id === templateId) ?? TEMPLATES[0];
   const students = useMemo(() => present(roster), [roster]);
-  const names = useMemo(() => roster.map(s => s.name), [roster]);
+  const names = useMemo(() => [...new Set([...roster.map(s => s.name), ...namesText.split(/\r?\n/)].map(n => n.trim()).filter(Boolean))], [roster, namesText]);
+  const label = (code: string) => {
+    const st = roster.find(s => s.code === code);
+    return st ? studentLabel(st) : code;
+  };
   const pagesByCode = useMemo(() => {
     const m = new Map<string, ProcessedPage[]>();
     pages.forEach(p => m.set(p.code, [...(m.get(p.code) ?? []), p]));
     return m;
   }, [pages]);
   const readCodes = useMemo(() => Object.keys(readings).concat(failedCodes), [readings, failedCodes]);
+  const numbers = useMemo(() => Object.fromEntries(roster.map(s => [s.code, s.number])), [roster]);
   const result = useMemo(
     () => (items.length && readCodes.length
-      ? buildRows(items, readings, { assessmentId: assessmentId || "평가", source, codes: readCodes, readReview, essayReview, reviewAll })
+      ? buildRows(items, readings, { assessmentId: assessmentId || "평가", source, codes: readCodes, readReview, essayReview, reviewAll, numbers })
       : null),
-    [items, readings, readCodes, assessmentId, source, readReview, essayReview, reviewAll],
+    [items, readings, readCodes, assessmentId, source, readReview, essayReview, reviewAll, numbers],
   );
 
   function updateAccessKey(value: string) {
@@ -166,11 +177,11 @@ export function GradingProvider({ children }: { children: ReactNode }) {
     setCellInfo({});
   }
 
-  // ---- 1. 명부 -------------------------------------------------------------
+  // ---- 1. 학생 번호 ---------------------------------------------------------
   function makeRoster() {
-    if (!confirmReset("명부를 다시 만듭니다.")) return false;
+    if (!confirmReset("학생 목록을 다시 만듭니다.")) return false;
     try {
-      setRoster(createRoster(namesText.split(/\r?\n/), roster));
+      setRoster(numberRoster(Number(studentCount), parseNumberList(absentText), roster));
       setRosterError("");
       resetPages();
       setDemo(false);
@@ -182,11 +193,12 @@ export function GradingProvider({ children }: { children: ReactNode }) {
   }
 
   async function loadRosterFile(file?: File) {
-    if (!file || !confirmReset("명부를 새로 불러옵니다.")) return false;
+    if (!file || !confirmReset("학생 번호·코드를 새로 불러옵니다.")) return false;
     try {
       const loaded = parseRoster(await file.text());
       setRoster(loaded);
-      setNamesText(loaded.map(s => s.name).join("\n"));
+      setStudentCount(String(loaded.length));
+      setAbsentText(loaded.filter(s => s.absent).map(s => s.number).join(", "));
       setRosterError("");
       resetPages();
       setDemo(false);
@@ -199,7 +211,9 @@ export function GradingProvider({ children }: { children: ReactNode }) {
 
   function toggleAbsent(code: string) {
     if (!confirmReset("결시 여부를 바꾸면 사진 순서가 달라집니다.")) return;
-    setRoster(rs => rs.map(s => (s.code === code ? { ...s, absent: !s.absent } : s)));
+    const next = roster.map(s => (s.code === code ? { ...s, absent: !s.absent } : s));
+    setRoster(next);
+    setAbsentText(next.filter(s => s.absent).map(s => s.number).join(", "));
     resetPages();
   }
 
@@ -283,11 +297,10 @@ export function GradingProvider({ children }: { children: ReactNode }) {
       const need = students.length * pagesPerStudent;
       const have = opened.pages.length * layout.split;
       if (have !== need) {
-        throw new Error(`쪽 수가 맞지 않습니다: 스캔 ${opened.pages.length}장${layout.split === 2 ? " × 2쪽(모아 찍기)" : ""} = ${have}쪽, 응시 학생 ${students.length}명 × ${pagesPerStudent}쪽 = ${need}쪽. 결시생은 명부에서 결시로 표시하고, 스캔 방식과 학생 1명 쪽수를 확인하세요.`);
+        throw new Error(`쪽 수가 맞지 않습니다: 스캔 ${opened.pages.length}장${layout.split === 2 ? " × 2쪽(모아 찍기)" : ""} = ${have}쪽, 응시 학생 ${students.length}명 × ${pagesPerStudent}쪽 = ${need}쪽. 결시생은 학생 번호 단계에서 결시로 표시하고, 스캔 방식과 학생 1명 쪽수를 확인하세요.`);
       }
       // 한 장씩 읽고 → 돌리고·나누고 → 작은 JPEG로 잠시 모아 둔다 (원본 스캔은 바로 버린다).
       // 같은 쪽 번호끼리 반 전체의 인쇄 위치를 비교해야 쪽마다 밀린 만큼 가림 띠를 늘릴 수 있다.
-      const namePage = template.identity?.page ?? 1;
       const out: ProcessedPage[] = [];
       const ids: Record<string, string> = {};
       const staged: Array<{ code: string; page: number; source: string; blob: Blob; profile: number[] }> = [];
@@ -306,6 +319,24 @@ export function GradingProvider({ children }: { children: ReactNode }) {
         else image.width = image.height = 0;
         setProcessed({ done: k, total: need });
       }
+      // 순서 확인 조각: 빈 시험지가 있으면 1쪽 머리글에서 "반·번호"만 잘라 보여 준다 (이름 글씨는 들어가지 않는다)
+      if (blankPdf) {
+        const numberBox = await headerNumberBox(blankPdf).catch(() => null);
+        if (numberBox) {
+          for (const st of staged.filter(x => x.page === 1)) {
+            const scan = await grayFromBlob(st.blob);
+            const key = `0:${scan.w}x${scan.h}`;
+            let blank = blankCache.current.get(key);
+            if (!blank) {
+              blank = await renderBlankPage(blankPdf, 0, scan.w, scan.h);
+              blankCache.current.set(key, blank);
+            }
+            const url = URL.createObjectURL(await grayToPng(cropByRegistration(scan, register(scan, blank), numberBox)));
+            ids[st.code] = url;
+            urls.current.push(url);
+          }
+        }
+      }
       // 쪽 번호마다 반 전체와 비교해 밀린 만큼 가림 띠를 늘린다 (줄이지는 않는다)
       for (let pageNo = 1; pageNo <= pagesPerStudent; pageNo++) {
         const group = staged.filter(st => st.page === pageNo);
@@ -315,10 +346,6 @@ export function GradingProvider({ children }: { children: ReactNode }) {
           const result = await processStaged(st.blob, st.source, st.code, pageNo, template, shifts[i]);
           out.push(result.processed);
           urls.current.push(result.processed.url);
-          if (pageNo === namePage && result.identityUrl) {
-            ids[st.code] = result.identityUrl;
-            urls.current.push(result.identityUrl);
-          }
         }
       }
       const order = new Map(students.map((st, i) => [st.code, i]));
@@ -359,7 +386,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
   // ---- 데모 ----------------------------------------------------------------
   async function startDemo() {
     const hasInput = roster.length > 0 || items.length > 0;
-    if ((hasWork || hasInput) && !confirm("가상 반으로 바꿉니다. 지금 넣은 명부·정답표·사진·판독 결과가 모두 지워집니다. 계속할까요?")) return false;
+    if ((hasWork || hasInput) && !confirm("가상 반으로 바꿉니다. 지금 넣은 학생 번호·정답표·사진·판독 결과가 모두 지워집니다. 계속할까요?")) return false;
     const demoRoster = createRoster(demoNames(25));
     demoRoster[3].absent = true;
     const loaded = loadAnswerKey(SAMPLE_KEY_CSV, SAMPLE_KEY_NAME);
@@ -697,6 +724,7 @@ export function GradingProvider({ children }: { children: ReactNode }) {
   const value: GradingState = {
     accessKey, updateAccessKey, health, pricing: health?.pricing ?? DEFAULT_PRICING,
     namesText, setNamesText, roster, rosterError, makeRoster, loadRosterFile, toggleAbsent,
+    className, setClassName, studentCount, setStudentCount, absentText, setAbsentText, label,
     keyName, items, keyError, applyKey, assessmentId, setAssessmentId, source, setSource,
     templateId, setTemplateId, pagesPerStudent, setPagesPerStudent, layoutId, setLayoutId, processed, students, names,
     pages, pagesByCode, identity, pageError, processing, checked, setChecked, approved: approvedHashes != null,

@@ -1,5 +1,6 @@
-// 학생 코드 명부와 이름 가리기.
-// 명부(이름↔코드)는 브라우저 메모리와 교사가 내려받은 파일에만 있다. 서버로 보내지 않는다.
+// 학생 번호·가명 코드와 이름 가리기.
+// 이름은 받지 않는다: 교사는 학생 수와 결시 번호만 넣고, 화면에는 "13번 · K3M"처럼 번호와 가명만 나온다.
+// (답에 쓴 이름을 가리고 싶을 때만 이름 목록을 선택으로 받는다. 그 목록은 화면·결과·서버에 나가지 않는다.)
 
 import { parseCsv, toCsv } from "./csv.ts";
 
@@ -35,15 +36,39 @@ export function createRoster(names: string[], existing: Student[] = []): Student
   });
 }
 
+/** 이름 없이 번호만으로 학생 목록을 만든다. 같은 번호의 코드·결시는 유지한다. */
+export function numberRoster(count: number, absent: number[] = [], existing: Student[] = []): Student[] {
+  if (!Number.isInteger(count) || count < 1 || count > 60) throw new Error("학생 수는 1~60 사이로 적어 주세요");
+  const bad = absent.filter(n => !Number.isInteger(n) || n < 1 || n > count);
+  if (bad.length) throw new Error(`결시 번호가 학생 수 범위 밖입니다: ${bad.join(", ")}`);
+  const old = new Map(existing.map(s => [s.number, s.code]));
+  const taken = new Set(old.values());
+  return Array.from({ length: count }, (_, i) => {
+    const number = i + 1;
+    const code = old.get(number) ?? newCode(taken);
+    taken.add(code);
+    return { number, name: "", code, absent: absent.includes(number) };
+  });
+}
+
+/** "3, 17 21" → [3, 17, 21] */
+export function parseNumberList(text: string) {
+  return [...new Set((text.match(/\d+/g) ?? []).map(Number))].sort((a, b) => a - b);
+}
+
+/** 화면 표시용: "13번 · K3M" */
+export const studentLabel = (s: Pick<Student, "number" | "code">) => `${s.number}번 · ${s.code}`;
+
 export function rosterToCsv(students: Student[]) {
-  return toCsv(["번호", "이름", "코드", "결시"], students.map(s => ({ 번호: s.number, 이름: s.name, 코드: s.code, 결시: s.absent ? "Y" : "" })));
+  return toCsv(["번호", "코드", "결시"], students.map(s => ({ 번호: s.number, 코드: s.code, 결시: s.absent ? "Y" : "" })));
 }
 
 export function parseRoster(text: string): Student[] {
   const { columns, rows } = parseCsv(text);
-  if (!["번호", "이름", "코드"].every(c => columns.includes(c))) throw new Error("명부 파일에는 번호·이름·코드 열이 있어야 합니다");
+  if (!["번호", "코드"].every(c => columns.includes(c))) throw new Error("학생 목록 파일에는 번호·코드 열이 있어야 합니다");
+  // 예전 명부 파일에 이름 열이 있어도 이름은 읽지 않는다
   return rows.map(r => ({
-    number: Number(r["번호"]), name: r["이름"].trim(), code: r["코드"].trim(), absent: (r["결시"] ?? "").trim().toUpperCase() === "Y",
+    number: Number(r["번호"]), name: "", code: r["코드"].trim(), absent: (r["결시"] ?? "").trim().toUpperCase() === "Y",
   }));
 }
 

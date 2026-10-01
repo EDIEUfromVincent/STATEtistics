@@ -199,15 +199,8 @@ export async function processStaged(blob: Blob, source: string, code: string, pa
 /** 한 쪽을 정리한다: 크기 줄이기 → (로컬용) 이름 칸 조각 → 가림 → JPEG. shift만큼 가림 영역을 늘린다 */
 export async function processPage(raw: RawPage, code: string, page: number, template: Template, shift = 0) {
   const canvas = toCanvas(raw.image);
-  let identityUrl = "";
-  if (template.identity?.page === page) {
-    const [x, y, w, h] = box(canvas, shiftRegion(template.identity.region, shift));
-    const crop = document.createElement("canvas");
-    crop.width = w;
-    crop.height = h;
-    crop.getContext("2d")!.drawImage(canvas, x, y, w, h, 0, 0, w, h);
-    identityUrl = URL.createObjectURL(await jpeg(crop));
-  }
+  // 이름 칸 조각은 만들지 않는다 (학생 이름이 보이므로). 순서 확인은 "반·번호"만 자른 조각으로 한다
+  const identityUrl = "";
   const ctx = canvas.getContext("2d")!;
   ctx.fillStyle = "black";
   for (const r of template.redact.filter(r => r.page === page || r.page === 0)) ctx.fillRect(...box(canvas, shiftRegion(r.region, shift)));

@@ -39,7 +39,7 @@ export default function KeyStep() {
           {g.form && <p className="helper-line">{g.form.form} · {g.form.pages}쪽 · 칸 {Object.keys(g.form.cells).length}개 {g.useCells ? "→ 양식 기반 판독을 씁니다" : "→ 빈 시험지 PDF도 넣어 주세요"}</p>}
         </div>
         {unmapped.length > 0 && <p className="warn-note">성취기준 매핑이 확인되지 않은 문항: {unmapped.join(", ")} — 정답표의 매핑상태 열을 &quot;확인&quot;으로 바꾸면 이 표시가 사라집니다.</p>}
-        <div className="step-next">{g.roster.length > 0 ? <Link className="primary-action" href="/grading/photos">다음: 사진 넣기 →</Link> : <Link className="primary-action" href="/grading">명부 만들러 가기 →</Link>}</div>
+        <div className="step-next">{g.roster.length > 0 ? <Link className="primary-action" href="/grading/photos">다음: 사진 넣기 →</Link> : <Link className="primary-action" href="/grading">학생 번호 만들러 가기 →</Link>}</div>
       </>}
     </section>
   );

@@ -4,10 +4,12 @@ import type { Item } from "./answerKey.ts";
 import { CONFIRMED, gradeItem, AUTO } from "./grade.ts";
 
 export const LONG_COLUMNS = [
-  "학생코드", "평가ID", "출처", "문항", "유형", "응답", "정규화응답", "정오", "점수", "배점",
+  "학생번호", "학생코드", "평가ID", "출처", "문항", "유형", "응답", "정규화응답", "정오", "점수", "배점",
   "성취기준", "행동영역", "난이도", "채점방식", "표시", "판독신뢰도",
 ] as const;
 export type LongRow = Record<(typeof LONG_COLUMNS)[number], string>;
+// 불러오기 검사용: 학생번호가 없는 예전 결과 파일도 받는다
+export const REQUIRED_COLUMNS = LONG_COLUMNS.filter(c => c !== "학생번호");
 
 // note: 교사 확인으로 보낸 이유 (예: 두 판독이 다름). 칸 판독에서만 채운다
 export type Reading = { answer: string; confidence: number; nameHits: number; note?: string };
@@ -31,6 +33,8 @@ export type BuildOptions = {
   reviewAll?: boolean;
   readReview?: Record<string, ReadReview>;
   essayReview?: Record<string, EssayReview>;
+  // 학생코드 → 출석번호. 있으면 결과를 번호 순서로 나열하고 학생번호 열을 채운다
+  numbers?: Record<string, number>;
 };
 
 export type BuildResult = {
@@ -49,13 +53,16 @@ export function buildRows(items: Item[], readings: Readings, options: BuildOptio
   const essayQueue: BuildResult["essayQueue"] = [];
 
   const codes = options.codes ?? Object.keys(readings);
-  for (const code of [...codes].sort()) {
+  const numbers = options.numbers ?? {};
+  const order = [...codes].sort((a, b) => (numbers[a] ?? Infinity) - (numbers[b] ?? Infinity) || a.localeCompare(b));
+  for (const code of order) {
+    const 학생번호 = numbers[code] != null ? String(numbers[code]) : "";
     const read = readings[code];
     for (const it of items) {
       if (!read) {
         // 판독이 안 된 것을 무응답 0점으로 처리하면 점수가 틀린다
         rows.push({
-          학생코드: code, 평가ID: options.assessmentId, 출처: options.source, 문항: it.no, 유형: it.kind,
+          학생번호, 학생코드: code, 평가ID: options.assessmentId, 출처: options.source, 문항: it.no, 유형: it.kind,
           응답: "", 정규화응답: "", 정오: "", 점수: "", 배점: String(it.points),
           성취기준: it.standard, 행동영역: it.domain, 난이도: it.difficulty,
           채점방식: READ_FAILED, 표시: READ_FAILED, 판독신뢰도: "",
@@ -99,7 +106,7 @@ export function buildRows(items: Item[], readings: Readings, options: BuildOptio
       }
 
       rows.push({
-        학생코드: code, 평가ID: options.assessmentId, 출처: options.source, 문항: it.no, 유형: it.kind,
+        학생번호, 학생코드: code, 평가ID: options.assessmentId, 출처: options.source, 문항: it.no, 유형: it.kind,
         응답: answer, 정규화응답: res.method === AUTO ? res.normalized : "",
         정오: correct == null ? "" : correct ? "O" : "X",
         점수: score == null ? "" : String(score), 배점: String(it.points),
@@ -113,4 +120,28 @@ export function buildRows(items: Item[], readings: Readings, options: BuildOptio
 
 export function pendingCount(rows: LongRow[]) {
   return rows.filter(r => r.정오 === "" || r.표시.includes("판독확인필요")).length;
+}
+
+/** 시트에 바로 붙이는 학생별 점수표: 한 줄에 학생 한 명(번호 순서), 열은 문항별 점수·합계·득점률. 미확정 칸은 비운다 */
+export function scoreSheet(rows: LongRow[], items: Item[]) {
+  const itemCols = items.map(it => `${it.no}번(${it.points}점)`);
+  const columns = ["번호", "코드", ...itemCols, "합계", "확정 배점", "득점률(%)", "미확정"];
+  const students = [...new Map(rows.map(r => [r.학생코드, r.학생번호])).entries()];
+  const out = students.map(([code, number]) => {
+    const mine = new Map(rows.filter(r => r.학생코드 === code).map(r => [r.문항, r]));
+    const row: Record<string, string> = { 번호: number, 코드: code };
+    let total = 0, max = 0, pending = 0;
+    items.forEach((it, i) => {
+      const r = mine.get(it.no);
+      const settled = r && r.점수 !== "" && !r.표시.includes("판독확인필요");
+      row[itemCols[i]] = settled ? r.점수 : "";
+      if (settled) { total += Number(r.점수); max += it.points; } else pending++;
+    });
+    row["합계"] = String(total);
+    row["확정 배점"] = String(max);
+    row["득점률(%)"] = max ? String(Math.round((total / max) * 1000) / 10) : "";
+    row["미확정"] = String(pending);
+    return row;
+  });
+  return { columns, rows: out };
 }

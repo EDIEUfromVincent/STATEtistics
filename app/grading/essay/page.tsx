@@ -65,7 +65,7 @@ export default function EssayStep() {
                   const crop = g.cellInfo[k]?.crop;
                   const confirmed = er.final != null;
                   return <tr key={k} className={`${confirmed ? "reviewed-row" : ""} ${focus === k ? "focused-row" : ""}`} onClick={() => setPicked(k)}>
-                    <td><button className={`link-button ${focus === k ? "on" : ""}`} onClick={() => setPicked(k)}>{q.code}</button></td>
+                    <td><button className={`link-button ${focus === k ? "on" : ""}`} onClick={() => setPicked(k)}>{g.label(q.code)}</button></td>
                     <td>{crop ? <button className="crop-button" onClick={() => setZoom({ src: crop, label: `${q.code} · ${q.no}번` })}><img className="cell-crop essay-crop" src={crop} alt={`${q.code} ${q.no} 손글씨`} /></button> : <small>시험지 보기</small>}</td>
                     <td className="essay-cell"><textarea className="essay-text" rows={3} value={g.readReview[k]?.fixed || q.answer} onChange={e => setText(k, e.target.value, g.readings[q.code]?.[q.no]?.answer ?? "")} />
                       {g.cellInfo[k]?.note && <small className="reading-pair">{g.cellInfo[k].note}</small>}</td>
@@ -90,7 +90,7 @@ export default function EssayStep() {
                   const k = reviewKey(row.학생코드, it.no);
                   const crop = g.cellInfo[k]?.crop;
                   return <tr key={k}>
-                    <td>{row.학생코드}</td>
+                    <td>{g.label(row.학생코드)}</td>
                     <td>{crop ? <button className="crop-button" onClick={() => setZoom({ src: crop, label: `${row.학생코드} · ${it.no}번` })}><img className="cell-crop" src={crop} alt={`${row.학생코드} ${it.no} 칸`} /></button> : <small>없음</small>}</td>
                     <td><input className="cell-input wide" placeholder="학생이 쓴 글" value={g.readReview[k]?.fixed ?? ""} onChange={e => setText(k, e.target.value)} /></td>
                   </tr>;
@@ -100,7 +100,7 @@ export default function EssayStep() {
           })}
           {essayItems.length === 0 && <section className="grading-card"><p className="helper-line">서술형 문항이 없습니다.</p></section>}
         </div>
-        {focus && <PageFocus pages={g.pagesByCode.get(focusCode) ?? []} where={g.cellInfo[focus]?.where} label={`${focusCode} · ${focusNo}번`} onClose={() => setPicked("")} />}
+        {focus && <PageFocus pages={g.pagesByCode.get(focusCode) ?? []} where={g.cellInfo[focus]?.where} label={`${g.label(focusCode)} · ${focusNo}번`} onClose={() => setPicked("")} />}
       </div>
 
       {zoom && <div className="zoom-overlay" onClick={() => setZoom(null)} role="dialog" aria-label="손글씨 크게 보기">

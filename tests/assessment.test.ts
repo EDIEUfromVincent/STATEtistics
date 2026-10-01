@@ -108,7 +108,9 @@ test("명부: 무작위 코드, 동명이인 거부, CSV 왕복", () => {
   assert.throws(() => createRoster(["김민준", "김민준"]), /같은 이름/);
   const again = createRoster(["김민준", "이서윤", "박하린"], roster);
   assert.deepEqual(again.map(s => s.code), roster.map(s => s.code)); // 기존 코드 유지
-  assert.deepEqual(parseRoster(rosterToCsv(roster)), roster);
+  // 저장 파일에는 번호·코드·결시만 남고 이름은 남지 않는다
+  assert.deepEqual(parseRoster(rosterToCsv(roster)), roster.map(s => ({ ...s, name: "" })));
+  assert.ok(!rosterToCsv(roster).includes(roster[0].name));
 });
 
 test("판독에 실패한 학생은 0점이 아니라 미확정으로 남는다", () => {
@@ -318,4 +320,36 @@ test("서술형: 옮겨 적은 글을 고쳐도 판독 확인 목록에 오르�
   const row = scored.rows.find(r => r.문항 === "L3")!;
   assert.equal(row.점수, "1.5");
   assert.equal(row.채점방식, "교사확정");
+});
+
+import { numberRoster, parseNumberList, studentLabel } from "../app/lib/assessment/privacy.ts";
+import { scoreSheet } from "../app/lib/assessment/records.ts";
+
+test("이름 없이 번호로 학생 목록을 만든다", () => {
+  const r = numberRoster(5, parseNumberList("3, 5"));
+  assert.deepEqual(r.map(s => s.number), [1, 2, 3, 4, 5]);
+  assert.deepEqual(r.filter(s => s.absent).map(s => s.number), [3, 5]);
+  assert.ok(r.every(s => s.name === "" && /^[A-Z]\d[A-Z]$/.test(s.code)));
+  assert.equal(studentLabel(r[0]), `1번 · ${r[0].code}`);
+  // 다시 만들어도 같은 번호는 같은 코드
+  assert.deepEqual(numberRoster(6, [], r).slice(0, 5).map(s => s.code), r.map(s => s.code));
+  assert.throws(() => numberRoster(3, [4]));
+  // 예전 명부 파일의 이름 열은 읽지 않는다
+  assert.equal(parseRoster("번호,이름,코드,결시\n1,홍길동,A3C,\n").at(0)!.name, "");
+});
+
+test("결과는 번호 순서이고 학생별 점수표는 미확정 칸을 비운다", () => {
+  const readings = {
+    Z9Z: { "6-2": { answer: "높아", confidence: 1, nameHits: 0 }, "1": { answer: "③", confidence: 1, nameHits: 0 }, L3: { answer: "글", confidence: 1, nameHits: 0 } },
+    A3C: { "6-2": { answer: "낮아", confidence: 1, nameHits: 0 }, "1": { answer: "②", confidence: 0.3, nameHits: 0 }, L3: { answer: "", confidence: 1, nameHits: 0 } },
+  };
+  const { rows } = buildRows(KEY6, readings, { assessmentId: "t", source: "", numbers: { Z9Z: 2, A3C: 7 } });
+  assert.deepEqual([...new Set(rows.map(r => r.학생번호))], ["2", "7"]);
+  const sheet = scoreSheet(rows, KEY6);
+  assert.deepEqual(sheet.rows.map(r => r.번호), ["2", "7"]);
+  const first = sheet.rows[0];
+  assert.equal(first["L3번(2점)"], ""); // 서술형 미확정
+  assert.equal(first["합계"], "2");
+  assert.equal(first["미확정"], "1");
+  assert.equal(sheet.rows[1]["1번(1점)"], ""); // 판독 확인 대기
 });

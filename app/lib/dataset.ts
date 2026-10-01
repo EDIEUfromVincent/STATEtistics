@@ -3,7 +3,7 @@
 
 import { useSyncExternalStore } from "react";
 import { parseCsv } from "./assessment/csv";
-import { LONG_COLUMNS } from "./assessment/records";
+import { REQUIRED_COLUMNS } from "./assessment/records";
 
 export type DatasetSource = "합성" | "채점" | "가져옴";
 export type CurrentDataset = {
@@ -17,7 +17,7 @@ const KEY = "statetistic:currentDataset";
 const EVENT = "statetistic:dataset";
 
 export function isAssessmentCsv(columns: string[]) {
-  return LONG_COLUMNS.every(c => columns.includes(c));
+  return REQUIRED_COLUMNS.every(c => columns.includes(c));
 }
 
 export function setCurrentDataset(dataset: CurrentDataset) {

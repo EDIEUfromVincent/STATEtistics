@@ -452,3 +452,44 @@ export async function renderBlankPage(pdf: File, pageIndex: number, w: number, h
     await doc.destroy();
   }
 }
+
+/**
+ * 빈 시험지 1쪽 머리글에서 "반·번호" 부분의 위치. 학생 이름은 가장 오른쪽 "이름" 글자 뒤에 쓰므로
+ * 그 글자 앞까지만 잡는다 (이름 글씨는 들어오지 않는다). 찾지 못하면 null.
+ */
+export async function headerNumberBox(pdf: File): Promise<Box | null> {
+  const pdfjs = await import("pdfjs-dist");
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(await pdf.arrayBuffer()) }).promise;
+  try {
+    const page = await doc.getPage(1);
+    const { width: W, height: H } = page.getViewport({ scale: 1 });
+    const items = (await page.getTextContent()).items.filter((it): it is { str: string; transform: number[]; width: number; height: number } & typeof it => "str" in it);
+    const measure = document.createElement("canvas").getContext("2d")!;
+    let best: { x: number; y: number; h: number } | null = null;
+    for (const it of items) {
+      const k = it.str.lastIndexOf("이름");
+      if (k < 0) continue;
+      const h = it.height || Math.abs(it.transform[3]);
+      measure.font = `${h}px sans-serif`;
+      // 글자 폭이 고르지 않아(한글·밑줄·숫자) 앞부분 길이 비율을 캔버스로 잰다
+      const ratio = it.str.length ? measure.measureText(it.str.slice(0, k)).width / Math.max(1, measure.measureText(it.str).width) : 0;
+      const x = it.transform[4] + it.width * ratio;
+      if (!best || x > best.x) best = { x, y: it.transform[5], h };
+    }
+    if (!best) return null;
+    // 같은 줄(높이가 비슷한 글자)에서 가장 왼쪽
+    const left = Math.min(...items.filter(it => Math.abs(it.transform[5] - best!.y) < best!.h).map(it => it.transform[4]), best.x);
+    const top = 1 - (best.y + best.h * 1.6) / H, bottom = 1 - (best.y - best.h * 0.7) / H;
+    return [Math.max(0, left / W - 0.01), Math.max(0, top), Math.max(0, (best.x - best.h * 0.4) / W), Math.min(1, bottom)];
+  } finally {
+    await doc.destroy();
+  }
+}
+
+/** 등록 결과로 빈 양식 좌표의 칸을 스캔에서 잘라 낸다 (이름 칸 가리기 전 원본에서 번호만 잘라 볼 때) */
+export function cropByRegistration(scan: Gray, reg: Registration, box: Box): Gray {
+  const { sc, x0, y0 } = reg, { w, h } = scan;
+  const px = [Math.floor((x0 + box[0] * sc) * w), Math.floor((y0 + box[1] * sc) * h), Math.floor((x0 + box[2] * sc) * w), Math.floor((y0 + box[3] * sc) * h)];
+  return crop(scan, px[0], px[1], Math.max(px[0] + 1, px[2]), Math.max(px[1] + 1, px[3]));
+}

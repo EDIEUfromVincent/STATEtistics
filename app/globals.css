@@ -329,6 +329,13 @@ input[type=range] { width:100%; height:4px; margin-top:11px; accent-color:var(--
 .focus-mark { position:absolute; border:3px solid #e11d48; border-radius:4px; box-shadow:0 0 0 9999px rgba(15,23,42,.18); pointer-events:none; }
 tr.focused-row td { background:#eef4ff; }
 .review-split tbody tr { cursor:pointer; }
+.score-bars { display:grid; gap:4px; margin-top:6px; }
+.score-bar { display:grid; grid-template-columns:52px minmax(0,1fr) 150px; align-items:center; gap:8px; font-size:13px; }
+.score-label { text-align:right; color:#475467; }
+.score-track { height:14px; background:#eef1f6; border-radius:7px; overflow:hidden; }
+.score-fill { display:block; height:100%; background:#2563eb; border-radius:7px; }
+.score-value { color:#1f2937; }
+@media (max-width:600px) { .score-bar { grid-template-columns:44px minmax(0,1fr) 92px; } }
 .essay-block { border-top:1px solid #eef0f4; padding-top:12px; margin-top:12px; }
 .rubric-box { background:#f6f8fd; border:1px solid #e3e8f5; border-radius:7px; padding:10px 12px; font-size:12px; color:#3a4460; }
 .rubric-box p { margin:6px 0 0; line-height:1.6; }
