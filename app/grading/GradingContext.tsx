@@ -8,7 +8,7 @@ import { AnswerKeyError, loadAnswerKey, ocrSpec, pageCount, type Item } from "..
 import { addUsage, DEFAULT_PRICING, ZERO_USAGE, type Pricing, type Usage } from "../lib/assessment/cost";
 import { toCsv } from "../lib/assessment/csv";
 import { estimateShifts } from "../lib/assessment/align";
-import { blankLike, cellPair, cropByRegistration, FAINT, grayFromImage, headerNumberBox, register, toPx, strokesOnly, fitForReading, grayFromBlob, grayToPng, ink, matchQuality, pickByInk, preparePage, regionPair, renderBlankPage, type Gray, type PreparedPage } from "../lib/assessment/cells";
+import { blankLike, cellPair, cropByRegistration, packSheets, FAINT, grayFromImage, headerNumberBox, register, toPx, strokesOnly, fitForReading, grayFromBlob, grayToPng, ink, matchQuality, pickByInk, preparePage, regionPair, renderBlankPage, type Gray, type PreparedPage } from "../lib/assessment/cells";
 import { decide, SURE, UNSURE } from "../lib/assessment/decide";
 import { gradeItem } from "../lib/assessment/grade";
 import { FormError, parseForm, type FormLayout } from "../lib/assessment/form";
@@ -846,10 +846,18 @@ export function GradingProvider({ children }: { children: ReactNode }) {
             info[key] = { crop, a: null, b: null, note: info[key]?.note ?? "", where: whereOf[q.no] };
             return { id: q.no, hint: q.hint, blank: await blobToBase64(blankPng), student: await blobToBase64(studentPng) };
           }));
+          // Gemini 단독이면 칸을 몇 장의 묶음 그림으로 모아 한 번에 보낸다 (그림 장수만큼 요금이 나가서 칸마다 보내면 비싸다)
+          const sheetMode = Boolean(health?.cells?.a?.startsWith("gemini") && !health?.cells?.b);
+          const body = sheetMode
+            ? {
+                cells: payload.map(p => ({ id: p.id, hint: p.hint })),
+                sheets: await Promise.all((await packSheets(ask.map(q => ({ id: q.no, blank: q.blank, student: q.student })))).map(async sh => ({ ids: sh.ids, image: await blobToBase64(sh.png) }))),
+              }
+            : { cells: payload };
           const response = await fetch("/api/assessment/cells", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ cells: payload }),
+            body: JSON.stringify(body),
           });
           const data = await response.json();
           if (!response.ok) throw new Error(data.error ?? "칸 판독에 실패했습니다.");

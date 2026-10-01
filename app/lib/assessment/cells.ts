@@ -508,3 +508,70 @@ export function cropByRegistration(scan: Gray, reg: Registration, box: Box): Gra
   const px = [Math.floor((x0 + box[0] * sc) * w), Math.floor((y0 + box[1] * sc) * h), Math.floor((x0 + box[2] * sc) * w), Math.floor((y0 + box[3] * sc) * h)];
   return crop(scan, px[0], px[1], Math.max(px[0] + 1, px[2]), Math.max(px[1] + 1, px[3]));
 }
+
+/**
+ * 판독 요금을 줄이려고 학생 한 명의 칸 여러 개를 한 장에 모은다.
+ * Gemini는 이미지 크기와 상관없이 장당 약 1,060토큰을 매겨서, 작은 조각을 칸마다 두 장씩 보내면 학생 한 명에 약 5만 7천 토큰이 들었다.
+ * 한 줄 = [칸 이름 | 빈 양식 | 학생 답]. 줄 사이는 굵은 선으로 나눈다.
+ */
+export const SHEET_W = 1400;
+const SHEET_MAX_H = 1400;
+const LABEL_W = 150;
+const GAP = 14;
+
+export type SheetTile = { id: string; blank: Gray; student: Gray };
+
+export async function packSheets(tiles: SheetTile[]): Promise<Array<{ ids: string[]; png: Blob }>> {
+  const half = Math.floor((SHEET_W - LABEL_W - GAP * 3) / 2);
+  const fit = (g: Gray) => {
+    // 너비는 반 칸에 맞추고, 너무 키 큰 조각(선택형 문항 전체)은 높이를 줄인다
+    let w = half, h = Math.max(1, Math.round((g.h * half) / g.w));
+    if (h > 330) { h = 330; w = Math.max(1, Math.round((g.w * 330) / g.h)); }
+    return resize(g, w, h);
+  };
+  const rows = tiles.map(t => {
+    const b = fit(t.blank), s = fit(t.student);
+    return { id: t.id, b, s, h: Math.max(b.h, s.h, 60) + GAP * 2 };
+  });
+  const groups: Array<typeof rows> = [];
+  let cur: typeof rows = [], used = 0;
+  for (const r of rows) {
+    if (cur.length && used + r.h > SHEET_MAX_H) { groups.push(cur); cur = []; used = 0; }
+    cur.push(r); used += r.h;
+  }
+  if (cur.length) groups.push(cur);
+
+  const out: Array<{ ids: string[]; png: Blob }> = [];
+  for (const g of groups) {
+    const H = g.reduce((s, r) => s + r.h, 0);
+    const c = document.createElement("canvas");
+    c.width = SHEET_W;
+    c.height = H;
+    const ctx = c.getContext("2d")!;
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, SHEET_W, H);
+    let y = 0;
+    for (const r of g) {
+      const draw = (img: Gray, x: number) => {
+        const data = ctx.createImageData(img.w, img.h);
+        for (let i = 0; i < img.w * img.h; i++) {
+          data.data[i * 4] = data.data[i * 4 + 1] = data.data[i * 4 + 2] = img.d[i];
+          data.data[i * 4 + 3] = 255;
+        }
+        ctx.putImageData(data, x, y + GAP);
+      };
+      ctx.fillStyle = "#000";
+      ctx.font = "bold 44px sans-serif";
+      ctx.textBaseline = "middle";
+      ctx.fillText(r.id, 12, y + r.h / 2);
+      draw(r.b, LABEL_W + GAP);
+      draw(r.s, LABEL_W + GAP * 2 + half);
+      // 빈 양식과 학생 답 사이 세로선, 줄 아래 굵은 가로선
+      ctx.fillRect(LABEL_W + GAP + half + GAP / 2 - 1, y + 4, 3, r.h - 8);
+      y += r.h;
+      ctx.fillRect(0, y - 3, SHEET_W, 6);
+    }
+    out.push({ ids: g.map(r => r.id), png: await new Promise<Blob>((resolve, reject) => c.toBlob(b => { c.width = c.height = 0; if (b) resolve(b); else reject(new Error("판독 묶음 저장 실패")); }, "image/png")) });
+  }
+  return out;
+}

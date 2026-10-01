@@ -156,6 +156,56 @@ export async function readWithGemini(cells: CellInput[], keys: TeacherKeys) {
   return { readings: out, model: gemini.model, usage: { input: usage.input, output: usage.output + usage.thoughts }, usd };
 }
 
+export type SheetInput = { ids: string[]; image: string };
+
+/**
+ * 판독 A (Gemini, 묶음): 학생 한 명의 칸을 몇 장의 묶음 그림으로 받는다. 한 줄 = [칸 이름 | 빈 양식 | 학생 답].
+ * Gemini는 그림 크기와 상관없이 장당 토큰을 매기므로 칸마다 두 장씩 보낼 때보다 요금이 크게 준다.
+ */
+export async function readSheetsWithGemini(sheets: SheetInput[], hints: Map<string, string>, keys: TeacherKeys) {
+  const gemini = geminiConfig(keys);
+  const ids = sheets.flatMap(s => s.ids);
+  const parts: unknown[] = [
+    { text: `시험지의 답 칸 ${ids.length}개를 그림 ${sheets.length}장에 모았습니다. 그림마다 칸이 한 줄씩 있고 줄은 굵은 가로선으로 나뉩니다.
+한 줄: 왼쪽 굵은 글자는 칸 이름, 가운데는 아무것도 쓰지 않은 빈 양식, 오른쪽은 학생이 푼 시험지의 같은 칸입니다.
+아래 규칙에서 "첫째 이미지"는 가운데(빈 양식), "둘째 이미지"는 오른쪽(학생 칸)을 뜻합니다. 각 칸은 그 줄 안에서만 보고, 다른 줄의 글씨를 섞지 마세요.
+${RULES}
+칸마다 id, added, answer, form_differs, multiple_marks를 적으세요.
+${ids.map(id => `칸 ${id}${hints.get(id) ? ` (답의 종류: ${hints.get(id)})` : ""}`).join("\n")}` },
+  ];
+  sheets.forEach((s, i) => {
+    parts.push({ text: `그림 ${i + 1}: 칸 ${s.ids.join(", ")}` });
+    // 묶음 그림은 칸이 여러 개라 기본 해상도(장당 약 1,090토큰)로는 작은 체크 표시가 뭉개진다 → 아주 높은 해상도(장당 약 2,210토큰)
+    parts.push({ inlineData: { mimeType: "image/png", data: s.image }, mediaResolution: { level: "MEDIA_RESOLUTION_ULTRA_HIGH" } });
+  });
+  const schema = {
+    type: "OBJECT",
+    properties: {
+      cells: {
+        type: "ARRAY",
+        items: {
+          type: "OBJECT",
+          properties: { id: { type: "STRING", enum: ids }, added: { type: "BOOLEAN" }, answer: { type: "STRING" }, form_differs: { type: "BOOLEAN" }, multiple_marks: { type: "BOOLEAN" } },
+          required: ["id", "added", "answer", "form_differs", "multiple_marks"],
+        },
+      },
+    },
+    required: ["cells"],
+  };
+  let result;
+  try {
+    result = await callGemini(gemini, parts, schema);
+  } catch (error) {
+    if (error instanceof AssessmentApiError && (error.status === 503 || error.status === 403)) throw error;
+    result = await callGemini(gemini, parts, schema);
+  }
+  const { data, usage } = result;
+  const out = new Map<string, CellReading>();
+  for (const r of (Array.isArray(data.cells) ? data.cells : []) as Array<Record<string, unknown>>) if (typeof r.id === "string") out.set(r.id, parseOne(r));
+  const usd = (usage.input * gemini.priceInputPerM + (usage.output + usage.thoughts) * gemini.priceOutputPerM) / 1e6;
+  return { readings: out, model: gemini.model, usage: { input: usage.input, output: usage.output + usage.thoughts }, usd };
+}
+
 /** 판독 B: 로컬 Ollama. 비전 모델 한 번에 이미지 두 장씩, 칸마다 차례로 (GPU 하나를 나눠 쓴다) */
 export async function readWithLocal(cells: CellInput[]) {
   const cfg = readerConfig();  // 로컬 판독기는 선생님 키를 쓰지 않는다

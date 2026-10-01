@@ -77,7 +77,7 @@ export default function SettingsPage() {
             </div>
           </section>
           <section className="grading-card">
-            <header><h3>Anthropic API 키 (권장)</h3><p>Gemini가 &quot;정답&quot;으로 읽은 칸을 Claude Sonnet이 한 번 더 읽어 확인합니다. 6-4반 검증에서 자동 확정 오류가 약 8칸 → 2칸으로 줄었습니다. 한 반에 약 900~1,000원(추정)이 더 듭니다.</p></header>
+            <header><h3>Anthropic API 키 (권장)</h3><p>Gemini가 &quot;정답&quot;으로 읽은 칸을 Claude Sonnet이 한 번 더 읽어 확인합니다. 6-4반 검증에서 자동 확정 오류가 약 8칸 → 2칸으로 줄었습니다. 한 반에 약 1,000~1,200원(추정)이 더 듭니다.</p></header>
             <p className={k?.anthropic ? "ok-note" : "helper-line"}>{k?.anthropic ? `저장된 키 ${k.anthropic}` : "키가 없으면 확인 판독 없이 Gemini만으로 판독합니다."}</p>
             <ol className="helper-line"><li><a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">Anthropic 콘솔 → API Keys</a>에서 키를 만듭니다.</li></ol>
             <div className="grading-row">
