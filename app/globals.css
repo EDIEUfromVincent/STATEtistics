@@ -352,3 +352,7 @@ tr.focused-row td { background:#eef4ff; }
 tr.warn-row td { background:#fff8e1; }
 details.advanced { margin-top:14px; }
 details.advanced summary { cursor:pointer; color:#5b6474; font-size:13px; }
+
+.page-tools { display:flex; justify-content:flex-end; gap:8px; grid-column:1 / -1; }
+.csv-load { display:inline-flex; flex-direction:column; gap:4px; }
+.csv-load input[type=file] { display:none; }

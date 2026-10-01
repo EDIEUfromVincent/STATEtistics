@@ -4,16 +4,15 @@ import Link from "next/link";
 import { useMemo } from "react";
 import { clearCurrentDataset, parseDataset, useCurrentDatasetRaw } from "../lib/dataset";
 
-export type ActivePage = "generate" | "grading" | "import" | "analysis" | "studio";
+export type ActivePage = "generate" | "grading" | "analysis" | "studio";
 
-// 들여오는 단계와 쓰는 단계로 나눈다. 데이터를 들여오는 곳은 ① 준비뿐이고, ② 분석은 현재 데이터만 읽는다.
+// 만드는 단계와 쓰는 단계로 나눈다. 저장해 둔 CSV는 ② 분석 화면에서 바로 불러온다.
 const groups: Array<{ label: string; items: Array<{ id: ActivePage; href: string; label: string }> }> = [
   {
     label: "① 데이터 준비",
     items: [
-      { id: "generate", href: "/", label: "합성 데이터 생성" },
       { id: "grading", href: "/grading", label: "시험지 채점" },
-      { id: "import", href: "/import", label: "CSV 가져오기" },
+      { id: "generate", href: "/", label: "연습용 합성 데이터" },
     ],
   },
   {

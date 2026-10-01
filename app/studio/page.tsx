@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AppHeader } from "../components/AppHeader";
+import { CsvLoadButton } from "../components/CsvLoadButton";
 import { parseDataset, useCurrentDatasetRaw } from "../lib/dataset";
 
 type Row = Record<string, string>;
@@ -141,9 +142,10 @@ export default function StudioPage() {
       <AppHeader active="studio" title="시각화 · 예측" description="현재 데이터로 차트를 그리고 TabPFN 예측을 실행합니다. 예측만 외부(Prior Labs)로 전송됩니다." />
       <div className="studio-page">
         {!data ? (
-          <section className="studio-empty"><span>DATA</span><h3>분석할 데이터가 없습니다</h3><p>① 데이터 준비에서 데이터를 만들거나 불러오면 여기서 바로 쓸 수 있습니다.</p><div className="empty-links"><Link href="/">합성 데이터 생성</Link><Link href="/grading">시험지 채점</Link><Link href="/import">CSV 가져오기</Link></div></section>
+          <section className="studio-empty"><span>DATA</span><h3>분석할 데이터가 없습니다</h3><p>시험지 채점 결과나 연습용 합성 데이터를 만들거나, 가지고 있는 CSV를 불러오면 여기서 바로 쓸 수 있습니다.</p><div className="empty-links"><Link href="/grading">시험지 채점</Link><Link href="/">연습용 합성 데이터</Link><CsvLoadButton label="CSV 불러오기" /></div></section>
         ) : (
           <div className="studio-grid">
+            <div className="page-tools"><CsvLoadButton label="다른 CSV 불러오기" /></div>
             <section className="studio-card visualize-card">
               <header><div><span>01</span><h3>나만의 시각화</h3><p>열과 차트 유형을 자유롭게 조합하세요.</p></div></header>
               <div className="viz-controls">

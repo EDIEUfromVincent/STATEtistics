@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo } from "react";
 import { AppHeader } from "../components/AppHeader";
+import { CsvLoadButton } from "../components/CsvLoadButton";
 import { classStandards, distractors, itemStats, studentStandards } from "../lib/assessment/analysis";
 import { toCsv } from "../lib/assessment/csv";
 import { pendingCount, type LongRow } from "../lib/assessment/records";
@@ -30,10 +31,11 @@ export default function AnalysisPage() {
     <main>
       <AppHeader active="analysis" title="평가 분석" description="성취기준을 기준으로 문항·오답·학생별 근거를 봅니다. 성취수준은 교사가 판정합니다." />
       <div className="grading-page">
-        {!dataset && <EmptyState title="분석할 데이터가 없습니다" body="① 데이터 준비에서 데이터를 만들거나 불러오면 여기서 바로 분석됩니다." />}
+        {!dataset && <EmptyState title="분석할 데이터가 없습니다" body={'시험지 채점을 마치고 "이 결과로 분석하기"를 누르거나, 예전에 내려받은 채점 결과 CSV를 불러오세요.'} />}
         {dataset && !dataset.assessment && <EmptyState title="평가 분석에 쓸 수 없는 형식입니다" body={`현재 데이터(${dataset.name})는 문항 단위 응답이 아닙니다. 시험지 채점 결과나 합성 데이터의 "평가 응답"을 쓰거나, 이 데이터는 시각화 · 예측에서 보세요.`} studio />}
 
         {analysis && data && <>
+          <div className="page-tools"><CsvLoadButton label="다른 채점 결과 CSV 불러오기" /></div>
           <div className="kpi-grid">
             <div className="kpi"><span>데이터</span><strong className="kpi-name">{data.name}</strong><small>{dataset?.real ? "실제 학생 자료" : "합성 데이터"}</small></div>
             <div className="kpi"><span>응시 학생</span><strong>{new Set(data.rows.map(r => r.학생코드)).size}명</strong></div>
@@ -96,7 +98,7 @@ function makeWho(rows: Array<{ 학생코드: string; 학생번호?: string }>): 
 
 function EmptyState({ title, body, studio }: { title: string; body: string; studio?: boolean }) {
   return <section className="studio-empty"><span>DATA</span><h3>{title}</h3><p>{body}</p>
-    <div className="empty-links"><Link href="/grading">시험지 채점</Link><Link href="/">합성 데이터 생성</Link><Link href="/import">CSV 가져오기</Link>{studio && <Link href="/studio">시각화 · 예측</Link>}</div>
+    <div className="empty-links"><Link href="/grading">시험지 채점</Link><Link href="/">연습용 합성 데이터</Link><CsvLoadButton label="저장한 채점 결과 CSV 불러오기" />{studio && <Link href="/studio">시각화 · 예측</Link>}</div>
   </section>;
 }
 
