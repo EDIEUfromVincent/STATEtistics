@@ -38,7 +38,11 @@ async function open(): Promise<Db> {
   const url = process.env.DATABASE_URL?.trim();
   let db: Db;
   if (url) {
-    const postgres = (await import("postgres")).default;
+    // 서버 번들러(Cloudflare 플러그인)가 postgres를 Cloudflare용(cloudflare:sockets)으로 묶어 Node에서 연결하지 못했다.
+    // → 번들을 거치지 않고 실행 시점에 node_modules의 Node용 모듈을 직접 불러온다
+    const { createRequire } = await import("node:module");
+    const path = await import("node:path");
+    const postgres = createRequire(path.join(process.cwd(), "package.json"))("postgres") as typeof import("postgres");
     const sql = postgres(url, { max: 5, idle_timeout: 30, onnotice: () => {} });
     db = { query: async <T extends Row>(text: string, params: unknown[] = []) => (await sql.unsafe(text, params as never[])) as unknown as T[] };
   } else {
