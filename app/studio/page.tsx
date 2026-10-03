@@ -100,7 +100,7 @@ export default function StudioPage() {
       setServiceMessage(payload.error ?? "");
       setService(response.ok ? "online" : "offline");
     } catch {
-      setServiceMessage("STATEtistic 서버의 TabPFN API에 연결할 수 없습니다.");
+      setServiceMessage("STATEtistics 서버의 TabPFN API에 연결할 수 없습니다.");
       setService("offline");
     }
   }
@@ -177,7 +177,7 @@ export default function StudioPage() {
                 <div><span>TRAIN</span><b>75%</b></div><div><span>TEST</span><b>25%</b></div><div><span>FEATURES</span><b>{features.length}</b></div><div><span>ROWS</span><b>{data.rows.length}</b></div>
               </div>
               <button className="run-model" disabled={running || service === "offline" || (requiresAccessKey && !accessKey) || !features.length} onClick={runTabPFN}>{running ? "TabPFN API 분석 중…" : "TabPFN 모델 실행"}<b>→</b></button>
-              {service === "offline" && <div className="engine-guide"><strong>TabPFN API 설정을 확인하세요</strong><code>Railway Variables → PRIORLABS_API_KEY</code><small>{serviceMessage || "API 키는 브라우저나 GitHub에 노출되지 않고 STATEtistic 서버에서만 사용됩니다."}</small></div>}
+              {service === "offline" && <div className="engine-guide"><strong>TabPFN API 설정을 확인하세요</strong><code>Railway Variables → PRIORLABS_API_KEY</code><small>{serviceMessage || "API 키는 브라우저나 GitHub에 노출되지 않고 STATEtistics 서버에서만 사용됩니다."}</small></div>}
               {error && <div className="model-error">{error}</div>}
               {result && <ModelResults result={result} />}
               <p className={dataset?.real ? "warn-note" : "license-note"}>{dataset?.real ? "실제 학생 자료입니다. " : ""}체크한 열 {features.length}개와 목표 열만 예측을 위해 Prior Labs API(외부)로 전송됩니다. 식별자·자유 서술 열은 기본으로 빠져 있습니다.</p>

@@ -56,7 +56,7 @@ export default function GeneratorPage() {
     const zip = new JSZip();
     generated.forEach(dataset => zip.file(dataset.filename, `\uFEFF${datasetToCsv(dataset)}`));
     const blob = await zip.generateAsync({ type: "blob" });
-    downloadBlob(blob, `STATEtistic_${school}_${subject}_${seed}.zip`, "application/zip");
+    downloadBlob(blob, `STATEtistics_${school}_${subject}_${seed}.zip`, "application/zip");
   }
 
   async function copyCsv() {

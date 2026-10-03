@@ -29,8 +29,8 @@ const groups: Array<{ label: string; items: Array<{ id: ActivePage; href: string
 export function AppHeader({ active, title, description }: { active: ActivePage; title: string; description: string }) {
   return (
     <header className="topbar">
-      <Link href="/" className="wordmark" aria-label="STATEtistic 홈">
-        <span>STATE</span>tistic
+      <Link href="/" className="wordmark" aria-label="STATEtistics 홈">
+        <span>STATE</span>tistics
         <small>PERSONAL DATA LAB</small>
       </Link>
       <div className="heading">

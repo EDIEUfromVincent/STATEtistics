@@ -7,7 +7,7 @@ import {
 
 export async function POST(request: Request) {
   if (!hasValidStudioAccessKey(request)) {
-    return Response.json({ error: "STATEtistic 분석 액세스 코드가 올바르지 않습니다." }, { status: 401 });
+    return Response.json({ error: "STATEtistics 분석 액세스 코드가 올바르지 않습니다." }, { status: 401 });
   }
 
   const apiKey = getPriorLabsApiKey();
